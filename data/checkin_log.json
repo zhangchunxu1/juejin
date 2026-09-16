@@ -1,0 +1,34 @@
+[
+  {
+    "time": "2026-09-15 14:41:13",
+    "status": "未找到签到按钮或点击失败: Locator.click: Unexpected token \"=\" while parsing css selector \"button:has-text('立即签到'), .signin:has-text('立即签到'), text=立即签到\". Did you mean to CSS.escape it?\nCall log:\n  - waiting for button:has-text('立即签到'), .signin:has-text('立即签到'), text=立即签到 >> nth=0\n",
+    "lottery": "抽奖未成功（TypeError: Failed to fetch）",
+    "cont_days": 0,
+    "total_days": 4,
+    "points": 1900
+  },
+  {
+    "time": "2026-09-15 14:46:08",
+    "status": "今日已签到（无需重复操作）",
+    "lottery": "抽奖完成: 恭喜抽中93矿石",
+    "cont_days": 1,
+    "total_days": 5,
+    "points": 1993
+  },
+  {
+    "time": "2026-09-15 17:33:28",
+    "status": "今日已签到（无需重复操作）",
+    "lottery": "未找到抽奖入口",
+    "cont_days": 1,
+    "total_days": 5,
+    "points": 1993
+  },
+  {
+    "time": "2026-09-16 13:36:59",
+    "status": "签到成功",
+    "lottery": "抽奖完成: 恭喜抽中49矿石",
+    "cont_days": 2,
+    "total_days": 6,
+    "points": 2042
+  }
+]

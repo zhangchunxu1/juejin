@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>掘金沸点数据看板</title>
+  <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #f0f2f5; font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    #app { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
+    .header h2 { margin: 0; color: #1e80ff; }
+    .header .sub { color: #8a919f; font-size: 13px; }
+    .stat-cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+    .stat-card { background: #fff; border-radius: 8px; padding: 18px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+    .stat-card .label { color: #8a919f; font-size: 13px; }
+    .stat-card .value { font-size: 26px; font-weight: 700; color: #252933; margin-top: 6px; }
+    .panel { background: #fff; border-radius: 8px; padding: 16px 20px; box-shadow: 0 1px 4px rgba(0,0,0,.06); margin-bottom: 16px; }
+    .panel h3 { margin: 0 0 10px; font-size: 15px; color: #252933; }
+    .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .chart { height: 300px; }
+    .toolbar { display: flex; gap: 10px; margin-bottom: 12px; }
+    .content-cell { white-space: pre-wrap; word-break: break-word; }
+    .pager { margin-top: 12px; display: flex; justify-content: flex-end; }
+    a { color: #1e80ff; text-decoration: none; }
+    .log { background: #f6f8fa; border: 1px solid #e4e7ed; border-radius: 6px;
+           padding: 10px 12px; font-size: 12px; line-height: 1.6; max-height: 220px;
+           overflow: auto; white-space: pre-wrap; word-break: break-all;
+           font-family: Consolas, monospace; margin: 10px 0 0; color: #515767; }
+    .form-item { display: flex; align-items: center; gap: 8px; color: #515767; font-size: 14px; }
+    @media (max-width: 900px) {
+      .stat-cards, .charts { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div id="app">
+  <div class="header">
+    <h2>掘金沸点数据看板</h2>
+    <span class="sub" v-if="overview.last_crawl">最近抓取：{{ overview.last_crawl }}</span>
+  </div>
+
+  <!-- 统计卡片 -->
+  <div class="stat-cards">
+    <div class="stat-card"><div class="label">沸点总数</div><div class="value">{{ overview.pin_total ?? '-' }}</div></div>
+    <div class="stat-card"><div class="label">已抓评论</div><div class="value">{{ overview.comment_fetched ?? '-' }}</div></div>
+    <div class="stat-card"><div class="label">点赞总数</div><div class="value">{{ overview.digg_total ?? '-' }}</div></div>
+    <div class="stat-card"><div class="label">评论总数（平台）</div><div class="value">{{ overview.comment_total ?? '-' }}</div></div>
+  </div>
+
+  <!-- 图表 -->
+  <div class="charts">
+    <div class="panel"><h3>点赞 TOP10 沸点</h3><div ref="pinChart" class="chart"></div></div>
+    <div class="panel"><h3>上榜次数 TOP10 作者</h3><div ref="authorChart" class="chart"></div></div>
+  </div>
+
+  <!-- 抓取控制 -->
+  <div class="panel">
+    <h3>抓取控制</h3>
+    <div class="toolbar" style="flex-wrap: wrap;">
+      <div class="form-item">
+        <span>沸点条数</span>
+        <el-input-number v-model="cfg.total" :min="1" :max="500" style="width: 130px"></el-input-number>
+      </div>
+      <div class="form-item">
+        <span>每条评论数</span>
+        <el-input-number v-model="cfg.comments" :min="0" :max="100" :disabled="cfg.allComments" style="width: 130px"></el-input-number>
+      </div>
+      <el-checkbox v-model="cfg.allComments">抓取全部评论（较慢）</el-checkbox>
+      <el-button type="primary" :loading="scrape.running" @click="startScrape">
+        {{ scrape.running ? '抓取中...' : '开始抓取' }}
+      </el-button>
+      <span class="sub" style="color:#8a919f;font-size:12px">评论数 0 = 不抓评论；勾选"全部"则抓完该帖所有评论</span>
+    </div>
+    <div v-if="scrape.log" class="log" ref="logBox">{{ scrape.log }}</div>
+  </div>
+
+  <!-- 沸点列表 -->
+  <div class="panel">
+    <h3>沸点列表</h3>
+    <div class="toolbar">
+      <el-input v-model="keyword" placeholder="搜索内容 / 作者" clearable style="width: 260px"
+                @keyup.enter="loadPins(1)" @clear="loadPins(1)"></el-input>
+      <el-button type="primary" @click="loadPins(1)">搜索</el-button>
+      <el-button @click="loadPins()">刷新</el-button>
+      <el-button type="success" :loading="exporting" @click="exportExcel">导出 Excel</el-button>
+    </div>
+    <el-table :data="pins" v-loading="loading" stripe @sort-change="onSort">
+      <el-table-column type="index" label="#" width="50"></el-table-column>
+      <el-table-column prop="author" label="作者" width="130"></el-table-column>
+      <el-table-column prop="content" label="内容" min-width="320">
+        <template #default="{ row }">
+          <div class="content-cell">{{ row.content }}</div>
+        </template>
+      </el-table-column>
+      <el-table-column prop="digg_count" label="点赞" width="90" sortable="custom"></el-table-column>
+      <el-table-column prop="comment_count" label="评论" width="90" sortable="custom">
+        <template #default="{ row }">
+          <el-link type="primary" @click="openComments(row)">{{ row.comment_count }}</el-link>
+        </template>
+      </el-table-column>
+      <el-table-column prop="publish_time" label="发布时间" width="165" sortable="custom"></el-table-column>
+      <el-table-column label="链接" width="70">
+        <template #default="{ row }">
+          <a :href="row.pin_url" target="_blank">原文</a>
+        </template>
+      </el-table-column>
+    </el-table>
+    <div class="pager">
+      <el-pagination background layout="total, prev, pager, next, sizes"
+                     :total="total" v-model:current-page="page" v-model:page-size="size"
+                     :page-sizes="[10, 20, 50]"
+                     @current-change="loadPins()" @size-change="loadPins(1)"></el-pagination>
+    </div>
+  </div>
+
+  <!-- 评论抽屉 -->
+  <el-drawer v-model="drawer" :title="'评论 - ' + (currentPin ? currentPin.author : '')" size="55%">
+    <p style="margin-top:0;color:#515767;white-space:pre-wrap" v-if="currentPin">{{ currentPin.content }}</p>
+    <el-table :data="comments" v-loading="commentLoading" size="small" stripe>
+      <el-table-column type="index" label="#" width="45"></el-table-column>
+      <el-table-column prop="author" label="评论者" width="120"></el-table-column>
+      <el-table-column prop="content" label="评论内容" min-width="260">
+        <template #default="{ row }"><div class="content-cell">{{ row.content }}</div></template>
+      </el-table-column>
+      <el-table-column prop="digg_count" label="赞" width="60"></el-table-column>
+      <el-table-column prop="reply_count" label="回复" width="60"></el-table-column>
+      <el-table-column prop="comment_time" label="时间" width="160"></el-table-column>
+    </el-table>
+  </el-drawer>
+</div>
+
+<script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+<script src="https://unpkg.com/element-plus"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+const { createApp, ref, onMounted } = Vue;
+
+createApp({
+  setup() {
+    const overview = ref({});
+    const pins = ref([]);
+    const total = ref(0);
+    const page = ref(1);
+    const size = ref(10);
+    const keyword = ref('');
+    const sort = ref('publish_time');
+    const order = ref('desc');
+    const loading = ref(false);
+    const drawer = ref(false);
+    const comments = ref([]);
+    const commentLoading = ref(false);
+    const currentPin = ref(null);
+    const pinChart = ref(null);
+    const authorChart = ref(null);
+    const cfg = ref({ total: 50, comments: 20, allComments: false });
+    const scrape = ref({ running: false, log: '' });
+    const exporting = ref(false);
+    let pollTimer = null;
+
+    async function exportExcel() {
+      exporting.value = true;
+      try {
+        const resp = await fetch('/api/export');
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({}));
+          ElementPlus.ElMessage.warning(err.msg || '导出失败');
+          return;
+        }
+        const blob = await resp.blob();
+        const m = (resp.headers.get('Content-Disposition') || '').match(/filename\*=UTF-8''([^;]+)/);
+        const fname = m ? decodeURIComponent(m[1]) : '沸点热门.xlsx';
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = fname;
+        a.click();
+        URL.revokeObjectURL(url);
+        ElementPlus.ElMessage.success('已导出: ' + fname);
+      } catch (e) {
+        ElementPlus.ElMessage.error('导出失败: ' + e);
+      } finally {
+        exporting.value = false;
+      }
+    }
+
+    async function startScrape() {
+      try {
+        const r = await fetch('/api/scrape', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            total: cfg.value.total,
+            comments: cfg.value.allComments ? -1 : cfg.value.comments,
+          }),
+        }).then(r => r.json());
+        if (!r.ok) { ElementPlus.ElMessage.warning(r.msg || '启动失败'); return; }
+        scrape.value.running = true;
+        pollTimer = setInterval(pollStatus, 2000);
+        pollStatus();
+      } catch (e) {
+        ElementPlus.ElMessage.error('启动失败: ' + e);
+      }
+    }
+
+    async function pollStatus() {
+      const r = await fetch('/api/scrape/status').then(r => r.json());
+      const wasRunning = scrape.value.running;
+      scrape.value = r;
+      if (wasRunning && !r.running) {
+        clearInterval(pollTimer);
+        ElementPlus.ElMessage.success('抓取完成，数据已刷新');
+        loadStats();
+        loadPins(1);
+      }
+    }
+
+    async function loadStats() {
+      const r = await fetch('/api/stats').then(r => r.json());
+      overview.value = r.overview || {};
+      renderCharts(r.top_pins || [], r.top_authors || []);
+    }
+
+    function renderCharts(topPins, topAuthors) {
+      const c1 = echarts.init(pinChart.value);
+      c1.setOption({
+        grid: { left: 10, right: 30, top: 20, bottom: 10, containLabel: true },
+        tooltip: {},
+        xAxis: { type: 'value' },
+        yAxis: { type: 'category', inverse: true,
+                 data: topPins.map(p => p.author),
+                 axisLabel: { width: 90, overflow: 'truncate' } },
+        series: [{ type: 'bar', data: topPins.map(p => p.digg_count),
+                   itemStyle: { color: '#1e80ff', borderRadius: [0, 4, 4, 0] },
+                   label: { show: true, position: 'right' } }],
+      });
+      const c2 = echarts.init(authorChart.value);
+      c2.setOption({
+        grid: { left: 10, right: 30, top: 20, bottom: 10, containLabel: true },
+        tooltip: {},
+        xAxis: { type: 'value', minInterval: 1 },
+        yAxis: { type: 'category', inverse: true,
+                 data: topAuthors.map(a => a.author),
+                 axisLabel: { width: 90, overflow: 'truncate' } },
+        series: [{ type: 'bar', data: topAuthors.map(a => a.cnt),
+                   itemStyle: { color: '#37c6a9', borderRadius: [0, 4, 4, 0] },
+                   label: { show: true, position: 'right' } }],
+      });
+      window.addEventListener('resize', () => { c1.resize(); c2.resize(); });
+    }
+
+    async function loadPins(resetPage) {
+      if (resetPage) page.value = resetPage;
+      loading.value = true;
+      try {
+        const params = new URLSearchParams({
+          page: page.value, size: size.value,
+          keyword: keyword.value, sort: sort.value, order: order.value,
+        });
+        const r = await fetch('/api/pins?' + params).then(r => r.json());
+        pins.value = r.rows;
+        total.value = r.total;
+      } finally {
+        loading.value = false;
+      }
+    }
+
+    function onSort({ prop, order: o }) {
+      if (!prop) return;
+      sort.value = prop;
+      order.value = o === 'ascending' ? 'asc' : 'desc';
+      loadPins();
+    }
+
+    async function openComments(row) {
+      currentPin.value = row;
+      drawer.value = true;
+      commentLoading.value = true;
+      try {
+        const r = await fetch(`/api/pins/${row.msg_id}/comments`).then(r => r.json());
+        comments.value = r.rows;
+      } finally {
+        commentLoading.value = false;
+      }
+    }
+
+    onMounted(() => { loadStats(); loadPins(); });
+
+    return { overview, pins, total, page, size, keyword, loading,
+             drawer, comments, commentLoading, currentPin,
+             pinChart, authorChart, cfg, scrape, exporting, startScrape, exportExcel,
+             loadPins, onSort, openComments };
+  },
+}).use(ElementPlus).mount('#app');
+</script>
+</body>
+</html>
