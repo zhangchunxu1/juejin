@@ -40,9 +40,9 @@ TOTAL = 50           # 要获取的总条数
 PAGE_SIZE = 20       # 每页条数（分页抓取）
 COMMENTS_PER_PIN = 20  # 每条沸点抓取多少条热门评论（0 = 不抓评论，-1 = 全部）
 COMMENT_PAGE_SIZE = 20
-WORKERS = 2          # 评论并发线程数（默认 2；config.json 的 scrape.workers 可覆盖）
-PAGE_DELAY = 1.0     # 翻页间隔（秒）（默认 1.0；config.json 的 scrape.page_delay 可覆盖）
-PIN_DELAY = 1.5      # 沸点列表翻页间隔（秒）（默认 1.5；config.json 的 scrape.pin_delay 可覆盖）
+WORKERS = 5          # 评论并发线程数（不要调太大，防限流；config.json 的 scrape.workers 可覆盖）
+PAGE_DELAY = 0.3     # 翻页间隔（秒）（config.json 的 scrape.page_delay 可覆盖）
+PIN_DELAY = 0.5      # 沸点列表翻页间隔（秒）（config.json 的 scrape.pin_delay 可覆盖）
 # 数据目录: 脚本所在目录下的 data（项目整体搬家后无需再改）
 PROJ_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(PROJ_DIR, "data")

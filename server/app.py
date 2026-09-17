@@ -315,7 +315,7 @@ def auth_status():
 
 
 # ---------------- 抓取节奏（高级设置） ----------------
-SPEED_DEFAULTS = {"workers": 2, "page_delay": 1.0, "pin_delay": 1.5}
+SPEED_DEFAULTS = {"workers": 5, "page_delay": 0.3, "pin_delay": 0.5}
 SPEED_RANGES = {"workers": (1, 10), "page_delay": (0, 30), "pin_delay": (0, 30)}
 
 

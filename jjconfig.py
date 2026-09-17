@@ -29,11 +29,11 @@ TEMPLATE = {
     },
     # 网页看板里的定时抓取（秒）。0 = 关闭。
     "scrape_interval": 0,
-    # 抓取节奏（网页"高级设置"可改；不配则用脚本默认 workers=2 / page_delay=1.0 / pin_delay=1.5）
+    # 抓取节奏（网页"高级设置"可改；不配则用脚本默认 workers=5 / page_delay=0.3 / pin_delay=0.5）
     "scrape": {
-        "workers": 2,
-        "page_delay": 1.0,
-        "pin_delay": 1.5,
+        "workers": 5,
+        "page_delay": 0.3,
+        "pin_delay": 0.5,
     },
 }
 

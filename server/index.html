@@ -77,17 +77,17 @@
           <div class="form-item" style="margin-bottom:8px">
             <span style="width:110px">并发线程数</span>
             <el-input-number v-model="speed.workers" :min="1" :max="10" size="small" style="width:100px"></el-input-number>
-            <span class="sub" style="color:#8a919f;font-size:12px">默认 2，越大越快也越易限流</span>
+            <span class="sub" style="color:#8a919f;font-size:12px">默认 5，不要调太大，防限流</span>
           </div>
           <div class="form-item" style="margin-bottom:8px">
             <span style="width:110px">评论翻页间隔</span>
             <el-input-number v-model="speed.pageDelay" :min="0" :max="30" :step="0.1" size="small" style="width:100px"></el-input-number>
-            <span class="sub" style="color:#8a919f;font-size:12px">秒，默认 1.0</span>
+            <span class="sub" style="color:#8a919f;font-size:12px">秒，默认 0.3</span>
           </div>
           <div class="form-item" style="margin-bottom:8px">
             <span style="width:110px">列表翻页间隔</span>
             <el-input-number v-model="speed.pinDelay" :min="0" :max="30" :step="0.1" size="small" style="width:100px"></el-input-number>
-            <span class="sub" style="color:#8a919f;font-size:12px">秒，默认 1.5</span>
+            <span class="sub" style="color:#8a919f;font-size:12px">秒，默认 0.5</span>
           </div>
           <div>
             <el-button size="small" type="primary" @click="saveSpeed">保存节奏</el-button>
@@ -256,7 +256,7 @@ createApp({
     const auth = ref({ exists: false, user_name: '', saved_at: '' });
     const schedule = ref({ on: false, interval: 1800, customMin: 60, nextRun: null });
     const lotteryCfg = ref({ usePoints: false, maxPaid: 1 });
-    const speed = ref({ workers: 2, pageDelay: 1.0, pinDelay: 1.5 });
+    const speed = ref({ workers: 5, pageDelay: 0.3, pinDelay: 0.5 });
     let pollTimer = null;
     let checkinTimer = null;
 
