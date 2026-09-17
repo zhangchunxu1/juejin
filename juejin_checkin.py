@@ -124,8 +124,9 @@ def do_checkin(page, result):
     return True
 
 
-def do_lottery(page, result):
-    """抽奖部分：API 查免费次数，仅免费时抽，绝不消耗积分"""
+def do_lottery(page, result, use_points=False, max_paid=0):
+    """抽奖部分：免费次数优先；use_points=True 时允许矿石补抽（默认绝不花积分）
+    max_paid: 矿石补抽的最大次数（0=不限，直到矿石不足或接口拒绝）"""
     print("查询免费抽奖次数...")
     page.goto(LOTTERY_URL, wait_until="domcontentloaded", timeout=60000)
     page.wait_for_timeout(3000)
@@ -153,31 +154,62 @@ def do_lottery(page, result):
     if points_before is not None:
         print(f"当前矿石: {points_before}")
 
-    if not free_cnt:
+    if not free_cnt and not use_points:
         result["lottery"] = "今日免费次数已用完，未抽奖（不消耗积分）"
         result["points"] = points_before
         print(result["lottery"])
         return
 
-    # 有免费次数才抽，一次用掉全部免费机会
-    drew = 0
+    # 抽奖: 先用免费次数, 免费用完后按 use_points 决定是否矿石补抽
+    drew_free, drew_paid = 0, 0
     prizes = []
-    for _ in range(free_cnt):
+
+    def draw_once():
         r = api(page, "POST", "/growth_api/v1/lottery/draw")
         if not r or r.get("err_no") != 0:
             msg = (r or {}).get("err_msg") or (r or {}).get("error") or "未知错误"
             print(f"抽奖请求失败: {msg}")
+            return None
+        return (r.get("data") or {}).get("lottery_name") or "未知奖品"
+
+    # 免费部分
+    for _ in range(free_cnt or 0):
+        prize = draw_once()
+        if prize is None:
             break
-        drew += 1
-        prize_name = (r.get("data") or {}).get("lottery_name") or "未知奖品"
-        prizes.append(prize_name)
-        print(f"抽中: {prize_name}")
+        drew_free += 1
+        prizes.append(prize)
+        print(f"免费抽中: {prize}")
         page.wait_for_timeout(1500)  # 抽奖冷却, 防连点被风控
 
+    # 矿石补抽部分（仅当明确开启）
+    if use_points:
+        paid_limit = max_paid if max_paid > 0 else 10 ** 9
+        while drew_paid < paid_limit:
+            cur = get_points(page)
+            if cur is not None and cur < 200:  # 掘金单次抽奖 200 矿石
+                print(f"矿石不足({cur} < 200), 停止补抽")
+                break
+            prize = draw_once()
+            if prize is None:
+                break  # 接口拒绝(矿石不够/次数限制等), 自然停止
+            drew_paid += 1
+            prizes.append(prize)
+            print(f"矿石抽中: {prize}")
+            page.wait_for_timeout(1500)
+
     points_after = get_points(page)
-    result["lottery"] = f"免费抽奖 {drew} 次: " + ("、".join(prizes) if prizes else "无结果")
+    parts = []
+    if drew_free:
+        parts.append(f"免费 {drew_free} 次")
+    if drew_paid:
+        parts.append(f"矿石补抽 {drew_paid} 次")
+    result["lottery"] = ("抽奖完成[" + "、".join(parts) + "]: " if parts else "未抽奖: ") + \
+                        ("、".join(prizes) if prizes else "无结果")
     result["points"] = points_after
     result["points_before"] = points_before
+    result["drew_free"] = drew_free
+    result["drew_paid"] = drew_paid
     if points_after is not None:
         print(f"剩余矿石: {points_after}")
 
@@ -186,6 +218,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["all", "checkin", "lottery"], default="all",
                         help="all=签到+抽奖(默认), checkin=只签到, lottery=只抽奖")
+    parser.add_argument("--use-points", dest="use_points", action="store_true",
+                        help="免费次数用完后允许用矿石补抽（默认关闭, 绝不花积分）")
+    parser.add_argument("--max-paid", dest="max_paid", type=int, default=0,
+                        help="矿石补抽的最大次数, 0=不限(直到矿石不足)")
     args = parser.parse_args()
 
     if not os.path.exists(AUTH_PATH):
@@ -217,7 +253,7 @@ def main():
                     return
 
             if args.mode in ("all", "lottery"):
-                do_lottery(page, result)
+                do_lottery(page, result, use_points=args.use_points, max_paid=args.max_paid)
 
             # 签到-only 模式也补一份积分
             if args.mode == "checkin":

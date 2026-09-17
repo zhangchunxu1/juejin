@@ -36,5 +36,13 @@
     "mode": "lottery",
     "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
     "points": 2106
+  },
+  {
+    "time": "2026-09-17 17:15:55",
+    "mode": "checkin",
+    "status": "今日已签到（无需重复操作）",
+    "cont_days": 3,
+    "total_days": 7,
+    "points": 2106
   }
 ]

@@ -40,12 +40,36 @@ TOTAL = 50           # 要获取的总条数
 PAGE_SIZE = 20       # 每页条数（分页抓取）
 COMMENTS_PER_PIN = 20  # 每条沸点抓取多少条热门评论（0 = 不抓评论，-1 = 全部）
 COMMENT_PAGE_SIZE = 20
-WORKERS = 2          # 评论并发线程数（不要调太大，防限流；用户要求放慢: 5 -> 2）
-PAGE_DELAY = 1.0     # 翻页间隔（秒）（用户要求放慢: 0.3 -> 1.0）
-PIN_DELAY = 1.5      # 沸点列表翻页间隔（秒）（用户要求放慢: 0.5 -> 1.5）
+WORKERS = 2          # 评论并发线程数（默认 2；config.json 的 scrape.workers 可覆盖）
+PAGE_DELAY = 1.0     # 翻页间隔（秒）（默认 1.0；config.json 的 scrape.page_delay 可覆盖）
+PIN_DELAY = 1.5      # 沸点列表翻页间隔（秒）（默认 1.5；config.json 的 scrape.pin_delay 可覆盖）
 # 数据目录: 脚本所在目录下的 data（项目整体搬家后无需再改）
 PROJ_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(PROJ_DIR, "data")
+
+
+def _load_speed_overrides():
+    """从 config.json 的 scrape 节读取网页端设置的抓取节奏参数（没有则用默认）"""
+    global WORKERS, PAGE_DELAY, PIN_DELAY
+    try:
+        import json
+        cfg_path = os.path.join(PROJ_DIR, "config.json")
+        if not os.path.exists(cfg_path):
+            return
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            cfg = json.load(f)
+        sc = cfg.get("scrape") or {}
+        if isinstance(sc.get("workers"), int) and 1 <= sc["workers"] <= 10:
+            WORKERS = sc["workers"]
+        if isinstance(sc.get("page_delay"), (int, float)) and 0 <= sc["page_delay"] <= 30:
+            PAGE_DELAY = float(sc["page_delay"])
+        if isinstance(sc.get("pin_delay"), (int, float)) and 0 <= sc["pin_delay"] <= 30:
+            PIN_DELAY = float(sc["pin_delay"])
+    except Exception:
+        pass  # 配置坏了不影响抓取, 用默认值
+
+
+_load_speed_overrides()
 
 # MySQL 配置：非敏感项写在这里，密码从环境变量 MYSQL_PASSWORD 读取（不落盘）
 SAVE_TO_MYSQL = True

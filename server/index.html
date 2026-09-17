@@ -72,22 +72,54 @@
         {{ scrape.running ? '抓取中...' : '开始抓取' }}
       </el-button>
       <span class="sub" style="color:#8a919f;font-size:12px">评论数 0 = 不抓评论；勾选"全部"则抓完该帖所有评论</span>
+      <el-collapse style="margin-left:auto;min-width:220px;border:none">
+        <el-collapse-item title="高级设置（抓取节奏）" name="speed" style="font-size:13px">
+          <div class="form-item" style="margin-bottom:8px">
+            <span style="width:110px">并发线程数</span>
+            <el-input-number v-model="speed.workers" :min="1" :max="10" size="small" style="width:100px"></el-input-number>
+            <span class="sub" style="color:#8a919f;font-size:12px">默认 2，越大越快也越易限流</span>
+          </div>
+          <div class="form-item" style="margin-bottom:8px">
+            <span style="width:110px">评论翻页间隔</span>
+            <el-input-number v-model="speed.pageDelay" :min="0" :max="30" :step="0.1" size="small" style="width:100px"></el-input-number>
+            <span class="sub" style="color:#8a919f;font-size:12px">秒，默认 1.0</span>
+          </div>
+          <div class="form-item" style="margin-bottom:8px">
+            <span style="width:110px">列表翻页间隔</span>
+            <el-input-number v-model="speed.pinDelay" :min="0" :max="30" :step="0.1" size="small" style="width:100px"></el-input-number>
+            <span class="sub" style="color:#8a919f;font-size:12px">秒，默认 1.5</span>
+          </div>
+          <div>
+            <el-button size="small" type="primary" @click="saveSpeed">保存节奏</el-button>
+            <el-button size="small" @click="resetSpeed">恢复默认</el-button>
+            <span class="sub" style="color:#8a919f;font-size:12px;margin-left:6px">立即生效（下次抓取起）</span>
+          </div>
+        </el-collapse-item>
+      </el-collapse>
     </div>
     <div class="toolbar" style="margin-top:10px;flex-wrap:wrap;">
       <div class="form-item">
         <span>自动抓取</span>
         <el-switch v-model="schedule.on" @change="saveSchedule"></el-switch>
       </div>
-      <div class="form-item" v-if="schedule.on">
-        <span>间隔</span>
-        <el-input-number v-model="schedule.interval" :min="300" :step="300" style="width: 120px"
-                         @change="saveSchedule"></el-input-number>
-        <span>秒</span>
+      <el-radio-group v-model="schedule.interval" size="small" @change="saveSchedule"
+                      :disabled="!schedule.on">
+        <el-radio-button :value="1800">30分钟</el-radio-button>
+        <el-radio-button :value="3600">1小时</el-radio-button>
+        <el-radio-button :value="7200">2小时</el-radio-button>
+        <el-radio-button :value="21600">6小时</el-radio-button>
+        <el-radio-button :value="43200">12小时</el-radio-button>
+        <el-radio-button :value="-1">自定义</el-radio-button>
+      </el-radio-group>
+      <div class="form-item" v-if="schedule.interval === -1">
+        <el-input-number v-model="schedule.customMin" :min="5" :max="1440" :step="5"
+                         style="width: 110px" size="small" @change="saveCustomSchedule"></el-input-number>
+        <span style="font-size:13px;color:#515767">分钟</span>
       </div>
       <span class="sub" style="color:#8a919f;font-size:12px" v-if="schedule.on && schedule.nextRun">
         下次: {{ schedule.nextRun }}
       </span>
-      <span class="sub" style="color:#8a919f;font-size:12px">开着本页面后端即可自动刷榜（建议 ≥1800 秒防限流）</span>
+      <span class="sub" style="color:#8a919f;font-size:12px" v-else>开着本页面后端即可自动刷榜</span>
     </div>
     <div v-if="scrape.log" class="log" ref="logBox">{{ scrape.log }}</div>
   </div>
@@ -110,7 +142,15 @@
       <el-button :loading="checkin.running" @click="startCheckin('all')">
         签到 + 抽奖
       </el-button>
-      <span class="sub" style="color:#8a919f;font-size:12px">抽奖只在有免费次数时进行，不消耗矿石积分</span>
+      <div class="form-item" style="margin-left:4px">
+        <el-switch v-model="lotteryCfg.usePoints" size="small"></el-switch>
+        <span style="font-size:13px">矿石补抽</span>
+        <el-input-number v-model="lotteryCfg.maxPaid" :min="1" :max="100" size="small"
+                         style="width: 100px" v-if="lotteryCfg.usePoints"
+                         @change="saveLotteryCfg"></el-input-number>
+        <span style="font-size:13px;color:#515767" v-if="lotteryCfg.usePoints">次</span>
+      </div>
+      <span class="sub" style="color:#8a919f;font-size:12px">默认只用免费次数；开启「矿石补抽」后免费用完会花矿石(200/次)继续抽</span>
       <span class="sub" style="color:#8a919f;font-size:12px" v-if="auth.saved_at">登录时间: {{ auth.saved_at }}</span>
     </div>
     <div v-if="checkin.last" style="margin-top:10px;font-size:13px;color:#515767;">
@@ -124,12 +164,21 @@
   <!-- 沸点列表 -->
   <div class="panel">
     <h3>沸点列表</h3>
-    <div class="toolbar">
-      <el-input v-model="keyword" placeholder="搜索内容 / 作者" clearable style="width: 260px"
+    <div class="toolbar" style="flex-wrap:wrap;">
+      <el-input v-model="keyword" placeholder="搜索内容 / 作者" clearable style="width: 220px"
                 @keyup.enter="loadPins(1)" @clear="loadPins(1)"></el-input>
       <el-button type="primary" @click="loadPins(1)">搜索</el-button>
       <el-button @click="loadPins()">刷新</el-button>
       <el-button type="success" :loading="exporting" @click="exportExcel">导出 Excel</el-button>
+      <span style="width:12px"></span>
+      <span class="sub" style="color:#8a919f;font-size:13px">发布时间:</span>
+      <el-radio-group v-model="days" size="small" @change="loadPins(1)">
+        <el-radio-button :value="0">全部</el-radio-button>
+        <el-radio-button :value="1">今天</el-radio-button>
+        <el-radio-button :value="3">近3天</el-radio-button>
+        <el-radio-button :value="7">近7天</el-radio-button>
+        <el-radio-button :value="30">近30天</el-radio-button>
+      </el-radio-group>
     </div>
     <el-table :data="pins" v-loading="loading" stripe @sort-change="onSort">
       <el-table-column type="index" label="#" width="50"></el-table-column>
@@ -190,6 +239,7 @@ createApp({
     const page = ref(1);
     const size = ref(10);
     const keyword = ref('');
+    const days = ref(0);
     const sort = ref('publish_time');
     const order = ref('desc');
     const loading = ref(false);
@@ -204,7 +254,9 @@ createApp({
     const exporting = ref(false);
     const checkin = ref({ running: false, log: '', last: null });
     const auth = ref({ exists: false, user_name: '', saved_at: '' });
-    const schedule = ref({ on: false, interval: 1800, nextRun: null });
+    const schedule = ref({ on: false, interval: 1800, customMin: 60, nextRun: null });
+    const lotteryCfg = ref({ usePoints: false, maxPaid: 1 });
+    const speed = ref({ workers: 2, pageDelay: 1.0, pinDelay: 1.5 });
     let pollTimer = null;
     let checkinTimer = null;
 
@@ -234,7 +286,11 @@ createApp({
         const r = await fetch('/api/checkin', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ mode: mode || 'all' }),
+          body: JSON.stringify({
+            mode: mode || 'all',
+            use_points: lotteryCfg.value.usePoints,
+            max_paid: lotteryCfg.value.maxPaid,
+          }),
         }).then(r => r.json());
         if (!r.ok) { ElementPlus.ElMessage.warning(r.msg || '启动失败'); return; }
         checkin.value.running = true;
@@ -258,14 +314,29 @@ createApp({
       try {
         const r = await fetch('/api/schedule').then(r => r.json());
         schedule.value.on = r.interval > 0;
-        schedule.value.interval = r.interval > 0 ? r.interval : 1800;
+        const presets = [1800, 3600, 7200, 21600, 43200];
+        if (presets.includes(r.interval)) {
+          schedule.value.interval = r.interval;
+        } else if (r.interval > 0) {           // 旧的自定义值 -> 回显到自定义档
+          schedule.value.interval = -1;
+          schedule.value.customMin = Math.max(5, Math.round(r.interval / 60));
+        }
         schedule.value.nextRun = r.next_run;
       } catch (e) {}
     }
 
+    function currentIntervalSeconds() {
+      if (schedule.value.interval === -1) {
+        return Math.max(5, schedule.value.customMin || 60) * 60;  // 自定义分钟 -> 秒
+      }
+      return schedule.value.interval;
+    }
+
     async function saveSchedule() {
-      // switch 关 -> interval 0; 开 -> 用输入框值
-      const interval = schedule.value.on ? schedule.value.interval : 0;
+      if (schedule.value.interval === -1 && !schedule.value.on) {
+        // 从自定义档关掉开关: 不发请求, 只关
+      }
+      const interval = schedule.value.on ? currentIntervalSeconds() : 0;
       try {
         const r = await fetch('/api/schedule', {
           method: 'POST',
@@ -276,6 +347,57 @@ createApp({
         else ElementPlus.ElMessage.warning(r.msg || '保存失败');
         loadSchedule();
       } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
+    }
+
+    async function saveCustomSchedule() {
+      // 自定义分钟输入变化: 若开关开着立即保存
+      if (schedule.value.on) saveSchedule();
+    }
+
+    function saveLotteryCfg() {
+      try {
+        localStorage.setItem('lotteryCfg', JSON.stringify(lotteryCfg.value));
+      } catch (e) {}
+    }
+
+    function loadLotteryCfg() {
+      try {
+        const s = localStorage.getItem('lotteryCfg');
+        if (s) lotteryCfg.value = { ...lotteryCfg.value, ...JSON.parse(s) };
+      } catch (e) {}
+    }
+
+    async function loadSpeed() {
+      try {
+        const r = await fetch('/api/scrape/speed').then(r => r.json());
+        speed.value = { workers: r.speed.workers, pageDelay: r.speed.page_delay, pinDelay: r.speed.pin_delay };
+      } catch (e) {}
+    }
+
+    async function saveSpeed() {
+      try {
+        const r = await fetch('/api/scrape/speed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workers: speed.value.workers, page_delay: speed.value.pageDelay, pin_delay: speed.value.pinDelay }),
+        }).then(r => r.json());
+        if (r.ok) ElementPlus.ElMessage.success(r.msg);
+        else ElementPlus.ElMessage.warning(r.msg || '保存失败');
+      } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
+    }
+
+    async function resetSpeed() {
+      try {
+        const r = await fetch('/api/scrape/speed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reset: true }),
+        }).then(r => r.json());
+        if (r.ok) {
+          speed.value = { workers: r.speed.workers, pageDelay: r.speed.page_delay, pinDelay: r.speed.pin_delay };
+          ElementPlus.ElMessage.success(r.msg);
+        }
+      } catch (e) { ElementPlus.ElMessage.error('操作失败: ' + e); }
     }
 
     async function exportExcel() {
@@ -376,6 +498,7 @@ createApp({
         const params = new URLSearchParams({
           page: page.value, size: size.value,
           keyword: keyword.value, sort: sort.value, order: order.value,
+          days: days.value,
         });
         const r = await fetch('/api/pins?' + params).then(r => r.json());
         pins.value = r.rows;
@@ -404,13 +527,14 @@ createApp({
       }
     }
 
-    onMounted(() => { loadStats(); loadPins(); loadAuth(); loadSchedule(); });
+    onMounted(() => { loadStats(); loadPins(); loadAuth(); loadSchedule(); loadLotteryCfg(); loadSpeed(); });
 
-    return { overview, pins, total, page, size, keyword, loading,
+    return { overview, pins, total, page, size, keyword, days, loading,
              drawer, comments, commentLoading, currentPin,
              pinChart, authorChart, cfg, scrape, exporting, startScrape, exportExcel,
              loadPins, onSort, openComments,
-             checkin, auth, schedule, openLogin, startCheckin, saveSchedule };
+             checkin, auth, schedule, openLogin, startCheckin, saveSchedule, saveCustomSchedule,
+             lotteryCfg, saveLotteryCfg, speed, loadSpeed, saveSpeed, resetSpeed };
   },
 }).use(ElementPlus).mount('#app');
 </script>

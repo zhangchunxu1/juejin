@@ -146,7 +146,8 @@ def stats():
 
 @app.route("/api/pins")
 def pins():
-    """沸点分页列表，支持关键词搜索和排序"""
+    """沸点分页列表，支持关键词搜索、排序、发布时间范围筛选
+    days 参数: 0/缺省=全部, n=近 n 天（含今天）"""
     page = max(int(request.args.get("page", 1)), 1)
     size = min(max(int(request.args.get("size", 10)), 1), 100)
     keyword = request.args.get("keyword", "").strip()
@@ -154,11 +155,21 @@ def pins():
     order = "ASC" if request.args.get("order") == "asc" else "DESC"
     sort_col = {"digg_count": "digg_count", "comment_count": "comment_count",
                 "publish_time": "publish_time", "crawl_time": "crawl_time"}.get(sort, "publish_time")
+    try:
+        days = int(request.args.get("days", 0) or 0)
+    except ValueError:
+        days = 0
+    if days < 0:
+        days = 0
 
-    where, params = "", []
+    conds, params = [], []
     if keyword:
-        where = "WHERE content LIKE %s OR author LIKE %s"
-        params = [f"%{keyword}%", f"%{keyword}%"]
+        conds.append("(content LIKE %s OR author LIKE %s)")
+        params += [f"%{keyword}%", f"%{keyword}%"]
+    if days > 0:
+        conds.append("publish_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY)")
+        params.append(days - 1)  # 近1天=今天(减0天), 近3天=前天起(减2天)
+    where = ("WHERE " + " AND ".join(conds)) if conds else ""
 
     conn = get_conn()
     try:
@@ -251,11 +262,22 @@ def checkin():
     mode = data.get("mode", "all")
     if mode not in ("all", "checkin", "lottery"):
         mode = "all"
-    label = {"all": "签到 + 免费抽奖", "checkin": "仅签到", "lottery": "仅免费抽奖"}[mode]
+    label = {"all": "签到 + 免费抽奖", "checkin": "仅签到",
+             "lottery": "免费抽奖" if not data.get("use_points") else "抽奖(允许矿石补抽)"}[mode]
+
+    cmd = ["--mode", mode]
+    if data.get("use_points"):
+        cmd += ["--use-points"]
+        try:
+            max_paid = int(data.get("max_paid", 0) or 0)
+            if max_paid > 0:
+                cmd += ["--max-paid", str(max_paid)]
+        except (TypeError, ValueError):
+            pass
 
     with job_lock:
         checkin_job["log"] = f"启动: {label}...\n"
-    run_script_job(checkin_job, CHECKIN_PATH, ["--mode", mode],
+    run_script_job(checkin_job, CHECKIN_PATH, cmd,
                    lambda rc: f"{label}完成" if rc == 0 else f"{label}失败(退出码 {rc})")
     return jsonify({"ok": True})
 
@@ -290,6 +312,43 @@ def auth_status():
                         "saved_at": auth.get("saved_at", "")})
     except Exception as e:
         return jsonify({"exists": True, "user_name": "", "saved_at": "", "error": str(e)})
+
+
+# ---------------- 抓取节奏（高级设置） ----------------
+SPEED_DEFAULTS = {"workers": 2, "page_delay": 1.0, "pin_delay": 1.5}
+SPEED_RANGES = {"workers": (1, 10), "page_delay": (0, 30), "pin_delay": (0, 30)}
+
+
+@app.route("/api/scrape/speed", methods=["GET", "POST"])
+def scrape_speed():
+    """GET 读当前抓取节奏参数(含默认值); POST 保存(缺省键回落默认, 恢复默认传 reset=true)"""
+    if request.method == "GET":
+        cfg = load_config()
+        sc = dict(SPEED_DEFAULTS)
+        sc.update({k: v for k, v in (cfg.get("scrape") or {}).items() if k in SPEED_DEFAULTS})
+        return jsonify({"speed": sc, "defaults": SPEED_DEFAULTS})
+    data = request.get_json(force=True, silent=True) or {}
+    cfg = load_config()
+    if data.get("reset"):
+        cfg["scrape"] = dict(SPEED_DEFAULTS)
+        save_config(cfg)
+        return jsonify({"ok": True, "speed": dict(SPEED_DEFAULTS), "msg": "已恢复默认节奏"})
+    sc = dict(SPEED_DEFAULTS)
+    sc.update(cfg.get("scrape") or {})
+    for key in SPEED_DEFAULTS:
+        if key in data:
+            try:
+                val = float(data[key])
+            except (TypeError, ValueError):
+                return jsonify({"ok": False, "msg": f"{key} 必须是数字"}), 400
+            lo, hi = SPEED_RANGES[key]
+            val = int(val) if key == "workers" else val
+            if not (lo <= val <= hi):
+                return jsonify({"ok": False, "msg": f"{key} 超出范围 [{lo}, {hi}]"}), 400
+            sc[key] = val
+    cfg["scrape"] = sc
+    save_config(cfg)
+    return jsonify({"ok": True, "speed": sc, "msg": "抓取节奏已保存"})
 
 
 @app.route("/api/auth/login", methods=["POST"])
