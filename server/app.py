@@ -240,16 +240,23 @@ CHECKIN_LOG_PATH = os.path.join(DATA_DIR, "checkin_log.json")
 
 @app.route("/api/checkin", methods=["POST"])
 def checkin():
-    """启动签到+抽奖任务（后台跑 juejin_checkin.py）"""
+    """启动签到任务（后台跑 juejin_checkin.py）
+    body: {"mode": "all"|"checkin"|"lottery"}  默认 all"""
     if checkin_job["running"]:
         return jsonify({"ok": False, "msg": "已有签到任务在运行中"}), 409
     if not os.path.isfile(CHECKIN_PATH):
         return jsonify({"ok": False, "msg": f"未找到签到脚本: {CHECKIN_PATH}"}), 400
 
+    data = request.get_json(force=True, silent=True) or {}
+    mode = data.get("mode", "all")
+    if mode not in ("all", "checkin", "lottery"):
+        mode = "all"
+    label = {"all": "签到 + 免费抽奖", "checkin": "仅签到", "lottery": "仅免费抽奖"}[mode]
+
     with job_lock:
-        checkin_job["log"] = "启动: 签到 + 免费抽奖...\n"
-    run_script_job(checkin_job, CHECKIN_PATH, [],
-                   lambda rc: "签到完成" if rc == 0 else f"签到失败(退出码 {rc})")
+        checkin_job["log"] = f"启动: {label}...\n"
+    run_script_job(checkin_job, CHECKIN_PATH, ["--mode", mode],
+                   lambda rc: f"{label}完成" if rc == 0 else f"{label}失败(退出码 {rc})")
     return jsonify({"ok": True})
 
 

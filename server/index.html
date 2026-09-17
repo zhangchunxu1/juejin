@@ -101,15 +101,22 @@
       </el-tag>
       <el-button v-if="!auth.exists" type="primary" @click="openLogin">保存掘金登录</el-button>
       <el-button v-else type="warning" plain @click="openLogin">重新登录</el-button>
-      <el-button type="success" :loading="checkin.running" @click="startCheckin">
-        {{ checkin.running ? '执行中...' : '立即签到 + 抽奖' }}
+      <el-button type="success" :loading="checkin.running" @click="startCheckin('checkin')">
+        {{ checkin.running ? '执行中...' : '仅签到' }}
       </el-button>
+      <el-button type="warning" :loading="checkin.running" @click="startCheckin('lottery')">
+        免费抽奖
+      </el-button>
+      <el-button :loading="checkin.running" @click="startCheckin('all')">
+        签到 + 抽奖
+      </el-button>
+      <span class="sub" style="color:#8a919f;font-size:12px">抽奖只在有免费次数时进行，不消耗矿石积分</span>
       <span class="sub" style="color:#8a919f;font-size:12px" v-if="auth.saved_at">登录时间: {{ auth.saved_at }}</span>
     </div>
     <div v-if="checkin.last" style="margin-top:10px;font-size:13px;color:#515767;">
       最近一次（{{ checkin.last.time }}）: {{ checkin.last.status }}
       <template v-if="checkin.last.lottery">｜{{ checkin.last.lottery }}</template>
-      <template v-if="checkin.last.points !== undefined">｜矿石 {{ checkin.last.points }}</template>
+      <template v-if="checkin.last.points !== undefined && checkin.last.points !== null">｜矿石 {{ checkin.last.points }}</template>
     </div>
     <div v-if="checkin.log" class="log">{{ checkin.log }}</div>
   </div>
@@ -222,9 +229,13 @@ createApp({
       try { auth.value = await fetch('/api/auth/status').then(r => r.json()); } catch (e) {}
     }
 
-    async function startCheckin() {
+    async function startCheckin(mode) {
       try {
-        const r = await fetch('/api/checkin', { method: 'POST' }).then(r => r.json());
+        const r = await fetch('/api/checkin', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mode: mode || 'all' }),
+        }).then(r => r.json());
         if (!r.ok) { ElementPlus.ElMessage.warning(r.msg || '启动失败'); return; }
         checkin.value.running = true;
         checkinTimer = setInterval(pollCheckin, 3000);

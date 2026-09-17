@@ -30,5 +30,11 @@
     "cont_days": 2,
     "total_days": 6,
     "points": 2042
+  },
+  {
+    "time": "2026-09-17 17:13:35",
+    "mode": "lottery",
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2106
   }
 ]
