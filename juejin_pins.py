@@ -14,6 +14,7 @@
 """
 import os
 import json
+import sys
 import time
 import argparse
 import datetime
@@ -26,15 +27,25 @@ import requests
 
 from notify import notify, notify_once
 
+# Windows 控制台默认 GBK，print 内容含 emoji 时会 UnicodeEncodeError 崩溃。
+# 统一强制 stdout/stderr 走 UTF-8（chcp 65001 效果，写不进去也不影响运行）。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ============ 配置区 ============
 TOTAL = 50           # 要获取的总条数
 PAGE_SIZE = 20       # 每页条数（分页抓取）
 COMMENTS_PER_PIN = 20  # 每条沸点抓取多少条热门评论（0 = 不抓评论，-1 = 全部）
 COMMENT_PAGE_SIZE = 20
-WORKERS = 5          # 评论并发线程数（不要调太大，防限流）
-PAGE_DELAY = 0.3     # 翻页间隔（秒）
-PIN_DELAY = 0.5      # 沸点列表翻页间隔（秒）
-DATA_DIR = r"D:\11\juejin\data"
+WORKERS = 2          # 评论并发线程数（不要调太大，防限流；用户要求放慢: 5 -> 2）
+PAGE_DELAY = 1.0     # 翻页间隔（秒）（用户要求放慢: 0.3 -> 1.0）
+PIN_DELAY = 1.5      # 沸点列表翻页间隔（秒）（用户要求放慢: 0.5 -> 1.5）
+# 数据目录: 脚本所在目录下的 data（项目整体搬家后无需再改）
+PROJ_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(PROJ_DIR, "data")
 
 # MySQL 配置：非敏感项写在这里，密码从环境变量 MYSQL_PASSWORD 读取（不落盘）
 SAVE_TO_MYSQL = True
@@ -48,7 +59,7 @@ MYSQL_CONF = {
 
 def load_mysql_conf():
     """读取 MySQL 配置，密码取自环境变量 MYSQL_PASSWORD"""
-    password = os.environ.get("MYSQL_PASSWORD")
+    password = (os.environ.get("MYSQL_PASSWORD") or "").strip()  # strip: 防cmd set尾随空格
     if not password:
         return None
     return {**MYSQL_CONF, "password": password}

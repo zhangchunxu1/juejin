@@ -1,5 +1,5 @@
 @echo off
-rem Juejin pins scheduled scrape: hot list 100 pins (list only, --comments 0),
-rem comments handled by refresh patrol (last 3 days, full comments+replies), no Excel export.
-set MYSQL_PASSWORD=zc123456
-"D:\Program File\python.exe" D:\11\juejin\juejin_pins.py --total 100 --comments 0 --refresh-days 3 --no-excel >> D:\11\juejin\data\scrape_task.log 2>&1
+rem 掘金沸点定时抓取（计划任务入口）: 相对路径版, 项目移动/改名都不受影响
+rem 密码从 config.json 读取, 本文件不再包含密码
+cd /d "%~dp0"
+"%~dp0auto_scrape.py" %* >> "%~dp0data\scrape_task.log" 2>&1

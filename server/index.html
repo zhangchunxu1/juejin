@@ -73,7 +73,45 @@
       </el-button>
       <span class="sub" style="color:#8a919f;font-size:12px">评论数 0 = 不抓评论；勾选"全部"则抓完该帖所有评论</span>
     </div>
+    <div class="toolbar" style="margin-top:10px;flex-wrap:wrap;">
+      <div class="form-item">
+        <span>自动抓取</span>
+        <el-switch v-model="schedule.on" @change="saveSchedule"></el-switch>
+      </div>
+      <div class="form-item" v-if="schedule.on">
+        <span>间隔</span>
+        <el-input-number v-model="schedule.interval" :min="300" :step="300" style="width: 120px"
+                         @change="saveSchedule"></el-input-number>
+        <span>秒</span>
+      </div>
+      <span class="sub" style="color:#8a919f;font-size:12px" v-if="schedule.on && schedule.nextRun">
+        下次: {{ schedule.nextRun }}
+      </span>
+      <span class="sub" style="color:#8a919f;font-size:12px">开着本页面后端即可自动刷榜（建议 ≥1800 秒防限流）</span>
+    </div>
     <div v-if="scrape.log" class="log" ref="logBox">{{ scrape.log }}</div>
+  </div>
+
+  <!-- 签到 + 登录态 -->
+  <div class="panel">
+    <h3>每日签到 / 抽奖</h3>
+    <div class="toolbar" style="flex-wrap:wrap;">
+      <el-tag :type="auth.exists ? 'success' : 'info'" size="large">
+        {{ auth.exists ? ('已登录: ' + (auth.user_name || '未知用户')) : '未登录' }}
+      </el-tag>
+      <el-button v-if="!auth.exists" type="primary" @click="openLogin">保存掘金登录</el-button>
+      <el-button v-else type="warning" plain @click="openLogin">重新登录</el-button>
+      <el-button type="success" :loading="checkin.running" @click="startCheckin">
+        {{ checkin.running ? '执行中...' : '立即签到 + 抽奖' }}
+      </el-button>
+      <span class="sub" style="color:#8a919f;font-size:12px" v-if="auth.saved_at">登录时间: {{ auth.saved_at }}</span>
+    </div>
+    <div v-if="checkin.last" style="margin-top:10px;font-size:13px;color:#515767;">
+      最近一次（{{ checkin.last.time }}）: {{ checkin.last.status }}
+      <template v-if="checkin.last.lottery">｜{{ checkin.last.lottery }}</template>
+      <template v-if="checkin.last.points !== undefined">｜矿石 {{ checkin.last.points }}</template>
+    </div>
+    <div v-if="checkin.log" class="log">{{ checkin.log }}</div>
   </div>
 
   <!-- 沸点列表 -->
@@ -157,7 +195,77 @@ createApp({
     const cfg = ref({ total: 50, comments: 20, allComments: false });
     const scrape = ref({ running: false, log: '' });
     const exporting = ref(false);
+    const checkin = ref({ running: false, log: '', last: null });
+    const auth = ref({ exists: false, user_name: '', saved_at: '' });
+    const schedule = ref({ on: false, interval: 1800, nextRun: null });
     let pollTimer = null;
+    let checkinTimer = null;
+
+    async function openLogin() {
+      try {
+        const r = await fetch('/api/auth/login', { method: 'POST' }).then(r => r.json());
+        if (r.ok) {
+          ElementPlus.ElMessage.success(r.msg);
+          // 登录是独立浏览器窗口, 每 5 秒查一次状态, 检测到即刷新
+          const t = setInterval(async () => {
+            await loadAuth();
+            if (auth.value.exists) { clearInterval(t); ElementPlus.ElMessage.success('登录态已保存'); }
+          }, 5000);
+          setTimeout(() => clearInterval(t), 5 * 60 * 1000);
+        } else {
+          ElementPlus.ElMessage.warning(r.msg || '启动失败');
+        }
+      } catch (e) { ElementPlus.ElMessage.error('启动失败: ' + e); }
+    }
+
+    async function loadAuth() {
+      try { auth.value = await fetch('/api/auth/status').then(r => r.json()); } catch (e) {}
+    }
+
+    async function startCheckin() {
+      try {
+        const r = await fetch('/api/checkin', { method: 'POST' }).then(r => r.json());
+        if (!r.ok) { ElementPlus.ElMessage.warning(r.msg || '启动失败'); return; }
+        checkin.value.running = true;
+        checkinTimer = setInterval(pollCheckin, 3000);
+        pollCheckin();
+      } catch (e) { ElementPlus.ElMessage.error('启动失败: ' + e); }
+    }
+
+    async function pollCheckin() {
+      const r = await fetch('/api/checkin/status').then(r => r.json());
+      const wasRunning = checkin.value.running;
+      checkin.value = r;
+      if (wasRunning && !r.running) {
+        clearInterval(checkinTimer);
+        ElementPlus.ElMessage.success('签到任务结束');
+        loadAuth();
+      }
+    }
+
+    async function loadSchedule() {
+      try {
+        const r = await fetch('/api/schedule').then(r => r.json());
+        schedule.value.on = r.interval > 0;
+        schedule.value.interval = r.interval > 0 ? r.interval : 1800;
+        schedule.value.nextRun = r.next_run;
+      } catch (e) {}
+    }
+
+    async function saveSchedule() {
+      // switch 关 -> interval 0; 开 -> 用输入框值
+      const interval = schedule.value.on ? schedule.value.interval : 0;
+      try {
+        const r = await fetch('/api/schedule', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ interval }),
+        }).then(r => r.json());
+        if (r.ok) ElementPlus.ElMessage.success(r.msg);
+        else ElementPlus.ElMessage.warning(r.msg || '保存失败');
+        loadSchedule();
+      } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
+    }
 
     async function exportExcel() {
       exporting.value = true;
@@ -285,12 +393,13 @@ createApp({
       }
     }
 
-    onMounted(() => { loadStats(); loadPins(); });
+    onMounted(() => { loadStats(); loadPins(); loadAuth(); loadSchedule(); });
 
     return { overview, pins, total, page, size, keyword, loading,
              drawer, comments, commentLoading, currentPin,
              pinChart, authorChart, cfg, scrape, exporting, startScrape, exportExcel,
-             loadPins, onSort, openComments };
+             loadPins, onSort, openComments,
+             checkin, auth, schedule, openLogin, startCheckin, saveSchedule };
   },
 }).use(ElementPlus).mount('#app');
 </script>

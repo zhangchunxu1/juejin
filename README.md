@@ -1,106 +1,85 @@
-# 掘金工具集使用手册
+# 掘金工具集 · 使用与部署手册
 
-目录：`D:\11\juejin\`
+一个自包含的掘金沸点数据工具：抓取入库、网页看板、签到抽奖、自动定时，全部在网页上操作。
+
+> 旧版说明文档保留在 [`docs/README_旧版.md`](docs/README_旧版.md)，本文档为最新版。
+
+## 目录结构（整体拷贝这一个文件夹即可）
 
 ```
-D:\11\juejin\
-├── juejin_pins.py        # 沸点热门抓取（沸点+评论 → MySQL + Excel）
-├── juejin_checkin.py     # 每日自动签到 + 免费抽奖
+juejin\                       ← 项目根（文件夹放哪、叫什么名都行，内部全是相对路径）
+├── jjconfig.py               # 统一配置模块（所有脚本共用）
+├── config.json               # ★ 你的配置（含 MySQL 密码，别外传）
+├── config.example.json       # 配置模板（给别人时拷这个）
+├── requirements.txt          # Python 依赖清单
+├── 环境安装.bat               # 新电脑第一次用: 双击装依赖
+├── 一键启动看板.bat           # 日常使用: 双击开看板
+├── 安装定时任务.bat           # 每 30 分钟自动抓取（开关）
+├── 卸载定时任务.bat
+├── run_scrape.bat            # 定时任务入口（相对路径版）
+├── auto_scrape.py            # 静默抓取入口（自动读 config.json 密码）
+├── juejin_pins.py            # 沸点+评论抓取（requests 直连接口）
+├── juejin_checkin.py         # 每日签到+免费抽奖（Playwright）
+├── login_save.py             # 保存掘金登录态（网页上也能点）
+├── notify.py                 # 异常桌面通知
 ├── server\
-│   ├── app.py            # Flask 后端 API（端口 5000）
-│   └── index.html        # Vue3 + Element Plus 数据看板
-└── data\
-    ├── auth_juejin.json  # 掘金登录态（cookie，失效需重新登录）
-    ├── checkin_log.json  # 签到历史记录
-    └── 沸点热门_*.xlsx    # 历次抓取的 Excel 导出
+│   ├── app.py                # Flask 后端 API（端口 5000）
+│   └── index.html            # 网页看板（Vue3 + Element Plus + ECharts）
+├── data\                     # 登录态/签到记录/Excel 导出（自动生成）
+└── docs\README_旧版.md       # 旧版文档存档
 ```
 
-## 环境准备（只需一次）
+## 一、本机快速开始（3 步）
 
-```cmd
-pip install requests pandas openpyxl pymysql flask playwright
-python -m playwright install chromium
-```
+1. **装环境**（第一次）：双击 `环境安装.bat`（需已装 Python 3.10+ 和 MySQL）
+2. **填密码**：记事本打开 `config.json`，把 `mysql.password` 改成你的 MySQL 密码
+3. **开看板**：双击 `一键启动看板.bat`，浏览器自动打开 <http://127.0.0.1:5000>
 
-## 首次登录（只需一次，cookie 失效后再做）
+看板里能做的事：
 
-```cmd
-python D:\11\scripts\login_save.py juejin
-```
+| 功能                  | 位置              |
+| ------------------- | --------------- |
+| 抓取沸点/评论（条数自选、可全量评论） | 抓取控制面板          |
+| 定时自动抓取（间隔可调，重启保留）   | 抓取控制面板 · 自动抓取开关 |
+| 签到 + 免费抽奖           | 签到面板（需先保存登录）    |
+| 保存/更新掘金登录态          | 签到面板 · 「保存掘金登录」 |
+| 搜索、排序、看评论、导出 Excel  | 沸点列表            |
 
-会弹出浏览器，手动登录掘金后回车，登录态保存到 `data\auth_juejin.json`。
+## 二、部署到别人的电脑（4 步）
 
-## 日常使用
+1. **拷项目**：把整个 `juejin\` 文件夹拷过去（U盘/微信传输均可）。建议先删掉 `data\` 里的个人数据（登录态、记录）再给。
+2. **装基础软件**：对方电脑需要 **Python 3.10+**（安装时勾选 *Add to PATH*）和 **MySQL**；然后双击 `环境安装.bat`。
+3. **建库**：MySQL 里建一个空库即可（脚本会自动建表）：
+   ```sql
+   CREATE DATABASE IF NOT EXISTS juejin DEFAULT CHARSET utf8mb4;
+   ```
 
-### 1. 抓取沸点（cmd 直接跑）
+4. **填密码 + 启动**：改 `config.json` 的 `mysql.password` → 双击 `一键启动看板.bat` → 网页里点「保存掘金登录」用自己的账号登录一次 → 完事。
 
-```cmd
-set MYSQL_PASSWORD=zc123456 && python D:\11\juejin\juejin_pins.py
-```
+## 三、常见疑问
 
-| 参数 | 说明 | 示例 |
-|------|------|------|
-| `--total N` | 抓取沸点条数，默认 50 | `--total 100` |
-| `--comments N` | 每帖评论数，默认 20；`0`=不抓评论；`-1`=全部评论（自动含楼中楼回复） | `--comments -1` |
+**Q: 项目文件夹移到别处 / 改名 / 换电脑还能跑吗？**  
+能。所有脚本、bat、页面全部基于"文件自身位置"定位，不含任何写死的盘符路径。唯一要检查的是 Windows 计划任务（若装过定时抓取，重新运行一次 `安装定时任务.bat` 即可刷新路径）。
 
-结果：自动写入 MySQL + 导出 Excel 到 `data\沸点热门_时间戳.xlsx`。
+**Q: MySQL 密码写在哪？会泄露吗？**  
+写在 `config.json`（已加入 `.gitignore`，git 不会提交）。给别人拷项目时拷 `config.example.json` 那种不含密码的结构即可。也支持临时用环境变量 `MYSQL_PASSWORD` 覆盖。
 
-### 2. 数据看板（网页可视化）
+**Q: 定时抓取有哪两种方式？**  
+① 网页看板里开「自动抓取」开关——看着板开着才生效，间隔/开关状态重启保留；  
+② 双击 `安装定时任务.bat`——注册 Windows 计划任务，每 30 分钟静默抓取（不评论、不导 Excel），**关机也照常执行**（开机状态下）。
 
-```cmd
-set MYSQL_PASSWORD=zc123456 && python D:\11\juejin\server\app.py
-```
+**Q: 抓取慢/被限流？**  
+`juejin_pins.py` 配置区：`WORKERS`（默认 2）、`PAGE_DELAY`（默认 1.0s）、`PIN_DELAY`（默认 1.5s）。调小更慢更稳。
 
-浏览器访问 **http://127.0.0.1:5000**
+**Q: CMD 里跑脚本中文乱码/emoji 报错？**  
+已修复（脚本内置 UTF-8 输出兼容）。若仍见个别 `?` 是终端字体不支持，不影响数据。
 
-- 统计卡片、点赞 TOP10 / 活跃作者 TOP10 图表
-- 沸点列表：搜索、排序、分页、点"评论数"查看评论
-- **抓取控制面板**：网页上直接设置条数并启动抓取，实时看日志，完成自动刷新
+## 四、故障排查
 
-注意：cmd 窗口关掉服务就停了。
-
-### 3. 每日签到 + 抽奖
-
-```cmd
-python D:\11\juejin\juejin_checkin.py
-```
-
-自动完成签到、幸运大转盘免费抽奖，记录写入 `data\checkin_log.json`。
-
-挂 Windows 计划任务每天自动跑（PowerShell 执行一次）：
-
-```powershell
-schtasks /create /tn "JuejinCheckin" /tr "python D:\11\juejin\juejin_checkin.py" /sc daily /st 09:00
-```
-
-## 数据库说明
-
-- 库：`juejin`，本机 `127.0.0.1:3306`，账号 `root`
-- **密码不落盘**，每次运行用 `set MYSQL_PASSWORD=zc123456 &&` 传入
-- 表结构：
-
-| 表 | 唯一键 | 内容 |
-|----|--------|------|
-| `pin` | `msg_id` | 沸点：作者/内容/点赞/评论数/发布时间/链接/抓取时间 |
-| `pin_comment` | `comment_id` | 评论：所属 msg_id/作者/内容/点赞/回复数/时间 |
-
-- **沸点表**重复抓取不会产生重复数据（唯一键 + upsert，只刷新动态字段）
-- **评论表**为替换语义：每次抓到的沸点，其旧评论先整体删除再写入新数据，保证与线上当前状态一致（不会残留已删除的旧评论）
-- 沸点卡片显示的"评论数" = 顶层评论 + 楼中楼回复；`--comments -1` 会两者都抓（数量可能略少于显示值，差额为已被删除的评论）
-- 区分新旧数据用两个时间字段：
-
-```sql
--- 某次新抓到的沸点
-SELECT * FROM juejin.pin WHERE first_crawl_time >= '2026-09-15 16:00:00';
--- 老数据（被抓到过多次，点赞等有更新）
-SELECT * FROM juejin.pin WHERE first_crawl_time < crawl_time;
-```
-
-## 常见问题
-
-| 问题 | 解决 |
-|------|------|
-| 提示未找到登录状态 | 重新运行 `python D:\11\scripts\login_save.py juejin` |
-| 接口报错/限流 | 把脚本里 `WORKERS`（默认 5）调小、`PAGE_DELAY` 调大 |
-| 看板图表不显示 | 页面依赖 CDN（Vue/Element/ECharts），需联网 |
-| 签到失败 | cookie 过期，重新登录 |
+| 现象                  | 处理                                                                       |
+| ------------------- | ------------------------------------------------------------------------ |
+| 启动报「MySQL 密码未配置或错误」 | 检查 `config.json` 的 `mysql.password`                                      |
+| 看板能开但图表空            | 页面依赖 CDN（Vue/Element/ECharts），需联网                                        |
+| 签到提示登录状态异常          | 网页里点「重新登录」                                                               |
+| 点抓取没反应              | 看「抓取控制」日志框；或 CMD 手动跑 `python auto_scrape.py --total 10 --comments 0` 看输出 |
+| 端口被占                | 关掉占用 5000 端口的程序，或改 `server\app.py` 最后一行端口                                |

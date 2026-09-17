@@ -1,47 +1,110 @@
 # -*- coding: utf-8 -*-
-"""
+r"""
 掘金沸点数据可视化 - 后端 API
 读取本机 MySQL juejin 库，为前端页面提供数据
-密码从环境变量 MYSQL_PASSWORD 读取（不落盘）
+MySQL 密码来源: 环境变量 MYSQL_PASSWORD > config.json（见 jjconfig.py）
 
-启动: $env:MYSQL_PASSWORD='你的密码'; python D:\11\server\app.py
+启动: python server\app.py   （无需再设置环境变量）
 访问: http://127.0.0.1:5000
 """
+import json
 import os
-import sys
 import subprocess
+import sys
 import threading
+import time
 import datetime
 import pandas as pd
 import pymysql
 import pymysql.cursors
 from flask import Flask, jsonify, request, send_file, send_from_directory
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))   # ...\juejin\server
+PROJ_DIR = os.path.dirname(BASE_DIR)                    # ...\juejin（项目根）
+sys.path.insert(0, PROJ_DIR)                            # 让 app 能 import 项目根的模块
+from jjconfig import DATA_DIR, AUTH_PATH, load_config, save_config, get_mysql_conf  # noqa: E402
+
+SCRAPER_PATH = os.path.join(PROJ_DIR, "juejin_pins.py")
+CHECKIN_PATH = os.path.join(PROJ_DIR, "juejin_checkin.py")
+LOGIN_PATH = os.path.join(PROJ_DIR, "login_save.py")
+
 app = Flask(__name__)
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-SCRAPER_PATH = r"D:\11\juejin\juejin_pins.py"
-DATA_DIR = r"D:\11\juejin\data"
-
-# 抓取任务状态（单任务，简单内存态即可）
-scrape_job = {"running": False, "log": ""}
-job_lock = threading.Lock()
 
 
 def get_conn():
+    conf = get_mysql_conf()
+    if conf is None:
+        raise pymysql.err.OperationalError(1045, "未配置 MySQL 密码（config.json 或环境变量 MYSQL_PASSWORD）")
     return pymysql.connect(
-        host="127.0.0.1", port=3306, user="root",
-        password=os.environ.get("MYSQL_PASSWORD", ""),
-        database="juejin", charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
+        host=conf["host"], port=conf["port"], user=conf["user"],
+        password=conf["password"], database=conf["database"],
+        charset="utf8mb4", cursorclass=pymysql.cursors.DictCursor,
     )
 
 
+@app.errorhandler(pymysql.err.OperationalError)
+def db_error(e):
+    """数据库连接类错误统一返回友好 JSON"""
+    code = e.args[0] if e.args else 0
+    if code == 1045:
+        msg = "数据库连接失败: 密码错误或未配置, 请检查 config.json 里 mysql.password"
+    elif code == 2003:
+        msg = "数据库连接失败: 无法连接 MySQL, 请确认服务已启动"
+    elif code == 1049:
+        msg = "数据库连接失败: 不存在 juejin 库, 请先运行一次抓取脚本建库"
+    else:
+        msg = f"数据库连接失败: {e}"
+    return jsonify({"ok": False, "msg": msg}), 502
+
+
+# ---------------- 后台任务框架（抓取 / 签到 共用模式） ----------------
+def make_job():
+    return {"running": False, "log": "", "started_at": ""}
+
+
+scrape_job = make_job()
+checkin_job = make_job()
+job_lock = threading.Lock()
+
+
+def run_script_job(job, script_path, args, finish_line):
+    """在后台线程跑一个 py 脚本并把 stdout 逐行收集进 job['log']"""
+    def run():
+        with job_lock:
+            job.update(running=True, log=(job["log"].splitlines()[-1] + "\n" if job["log"] else ""),
+                       started_at=datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        try:
+            env = os.environ.copy()
+            env["PYTHONIOENCODING"] = "utf-8"  # 与父进程解码对齐, 防 GBK 乱码
+            proc = subprocess.Popen(
+                [sys.executable, script_path] + args,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding="utf-8", errors="replace",
+                env=env, cwd=PROJ_DIR,
+            )
+            for line in proc.stdout:
+                with job_lock:
+                    job["log"] = (job["log"] + line)[-10000:]
+            proc.wait()
+            with job_lock:
+                job["log"] += "\n" + finish_line(proc.returncode)
+        except Exception as exc:
+            with job_lock:
+                job["log"] += f"\n任务异常: {exc}"
+        finally:
+            with job_lock:
+                job["running"] = False
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+# ---------------- 页面 ----------------
 @app.route("/")
 def index():
     return send_from_directory(BASE_DIR, "index.html")
 
 
+# ---------------- 数据查询 ----------------
 @app.route("/api/stats")
 def stats():
     """总览统计 + 点赞TOP10 + 活跃作者TOP10"""
@@ -142,6 +205,7 @@ def pin_comments(msg_id):
         conn.close()
 
 
+# ---------------- 抓取 ----------------
 @app.route("/api/scrape", methods=["POST"])
 def scrape():
     """启动抓取任务（后台线程跑脚本，前端轮询进度）"""
@@ -150,40 +214,157 @@ def scrape():
 
     data = request.get_json(force=True, silent=True) or {}
     total = min(max(int(data.get("total", 50)), 1), 500)
-    comments = min(max(int(data.get("comments", 20)), -1), 100)  # -1 = 全部评论
+    comments = min(max(int(data.get("comments", 20)), -1), 100)
 
-    def run():
-        with job_lock:
-            scrape_job.update(running=True, log=f"启动: 沸点 {total} 条, 评论 {'全部' if comments < 0 else str(comments) + ' 条/帖'}\n")
-        proc = subprocess.Popen(
-            [sys.executable, SCRAPER_PATH, "--total", str(total), "--comments", str(comments)],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, encoding="utf-8", errors="replace",
-            env=os.environ.copy(),  # 继承 MYSQL_PASSWORD
-        )
-        for line in proc.stdout:
-            with job_lock:
-                # 日志只保留尾部，防止过长
-                scrape_job["log"] = (scrape_job["log"] + line)[-10000:]
-        proc.wait()
-        with job_lock:
-            scrape_job["log"] += f"\n{'抓取完成' if proc.returncode == 0 else f'抓取失败(退出码 {proc.returncode})'}"
-            scrape_job["running"] = False
+    if not os.path.isfile(SCRAPER_PATH):
+        return jsonify({"ok": False, "msg": f"未找到抓取脚本: {SCRAPER_PATH}"}), 400
 
-    threading.Thread(target=run, daemon=True).start()
+    head = f"启动: 沸点 {total} 条, 评论 {'全部' if comments < 0 else str(comments) + ' 条/帖'}\n"
+    with job_lock:
+        scrape_job["log"] = head
+    run_script_job(scrape_job, SCRAPER_PATH,
+                   ["--total", str(total), "--comments", str(comments)],
+                   lambda rc: "抓取完成" if rc == 0 else f"抓取失败(退出码 {rc})")
     return jsonify({"ok": True})
 
 
 @app.route("/api/scrape/status")
 def scrape_status():
-    """抓取任务进度"""
     with job_lock:
         return jsonify({"running": scrape_job["running"], "log": scrape_job["log"]})
 
 
+# ---------------- 签到 ----------------
+CHECKIN_LOG_PATH = os.path.join(DATA_DIR, "checkin_log.json")
+
+
+@app.route("/api/checkin", methods=["POST"])
+def checkin():
+    """启动签到+抽奖任务（后台跑 juejin_checkin.py）"""
+    if checkin_job["running"]:
+        return jsonify({"ok": False, "msg": "已有签到任务在运行中"}), 409
+    if not os.path.isfile(CHECKIN_PATH):
+        return jsonify({"ok": False, "msg": f"未找到签到脚本: {CHECKIN_PATH}"}), 400
+
+    with job_lock:
+        checkin_job["log"] = "启动: 签到 + 免费抽奖...\n"
+    run_script_job(checkin_job, CHECKIN_PATH, [],
+                   lambda rc: "签到完成" if rc == 0 else f"签到失败(退出码 {rc})")
+    return jsonify({"ok": True})
+
+
+@app.route("/api/checkin/status")
+def checkin_status():
+    with job_lock:
+        running, log = checkin_job["running"], checkin_job["log"]
+    # 附带最近一次签到结果
+    last = None
+    try:
+        with open(CHECKIN_LOG_PATH, "r", encoding="utf-8") as f:
+            records = json.load(f)
+        if records:
+            last = records[-1]
+    except Exception:
+        pass
+    return jsonify({"running": running, "log": log, "last": last})
+
+
+# ---------------- 登录态 ----------------
+@app.route("/api/auth/status")
+def auth_status():
+    """登录态文件是否存在 + 保存时间 + 保存时的用户名"""
+    if not os.path.exists(AUTH_PATH):
+        return jsonify({"exists": False})
+    try:
+        with open(AUTH_PATH, "r", encoding="utf-8") as f:
+            auth = json.load(f)
+        return jsonify({"exists": True,
+                        "user_name": auth.get("user_name", ""),
+                        "saved_at": auth.get("saved_at", "")})
+    except Exception as e:
+        return jsonify({"exists": True, "user_name": "", "saved_at": "", "error": str(e)})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    """弹出浏览器登录窗口（login_save.py），登录成功自动保存"""
+    if not os.path.isfile(LOGIN_PATH):
+        return jsonify({"ok": False, "msg": f"未找到登录脚本: {LOGIN_PATH}"}), 400
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
+    try:  # 有头浏览器, 独立进程, 不收集输出（用户在浏览器里操作）
+        subprocess.Popen([sys.executable, LOGIN_PATH],
+                         env=env, cwd=PROJ_DIR,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception as e:
+        return jsonify({"ok": False, "msg": f"启动登录窗口失败: {e}"}), 500
+    return jsonify({"ok": True, "msg": "已打开浏览器，登录成功后会自动保存"})
+
+
+# ---------------- 网页内定时抓取 ----------------
+scheduler_state = {"thread": None, "stop_event": threading.Event(), "next_run": None}
+
+
+def _scrape_once_scheduled():
+    """定时器触发的静默抓取（不抓评论, 刷新榜单即可）"""
+    with job_lock:
+        if scrape_job["running"]:
+            return
+        scrape_job["log"] = "定时抓取: 启动\n"
+    run_script_job(scrape_job, SCRAPER_PATH, ["--total", "100", "--comments", "0", "--no-excel"],
+                   lambda rc: f"定时抓取{'完成' if rc == 0 else f'失败(退出码 {rc})'}")
+
+
+def scheduler_loop(interval):
+    """常驻线程: 每 interval 秒触发一次抓取"""
+    while not scheduler_state["stop_event"].is_set():
+        scheduler_state["next_run"] = datetime.datetime.now() + datetime.timedelta(seconds=interval)
+        if scheduler_state["stop_event"].wait(timeout=interval):
+            break
+        _scrape_once_scheduled()
+
+
+def start_scheduler(interval):
+    stop_scheduler()
+    if interval <= 0:
+        return
+    scheduler_state["stop_event"] = threading.Event()
+    t = threading.Thread(target=scheduler_loop, args=(interval,), daemon=True)
+    scheduler_state["thread"] = t
+    t.start()
+
+
+def stop_scheduler():
+    scheduler_state["stop_event"].set()
+    scheduler_state["thread"] = None
+    scheduler_state["next_run"] = None
+
+
+@app.route("/api/schedule", methods=["GET", "POST"])
+def schedule():
+    """GET 查询定时抓取状态; POST 设置间隔（秒, 0=关闭），持久化到 config.json"""
+    if request.method == "GET":
+        interval = int(load_config().get("scrape_interval", 0) or 0)
+        return jsonify({"interval": interval,
+                        "active": scheduler_state["thread"] is not None,
+                        "next_run": scheduler_state["next_run"].strftime("%H:%M:%S") if scheduler_state["next_run"] else None})
+    data = request.get_json(force=True, silent=True) or {}
+    try:
+        interval = max(int(data.get("interval", 0)), 0)
+    except Exception:
+        return jsonify({"ok": False, "msg": "间隔必须是数字"}), 400
+    cfg = load_config()
+    cfg["scrape_interval"] = interval
+    save_config(cfg)
+    start_scheduler(interval)
+    return jsonify({"ok": True, "interval": interval,
+                    "msg": f"定时抓取已{'设置为每 ' + str(interval) + ' 秒一次' if interval > 0 else '关闭'}"})
+
+
+# ---------------- 导出 ----------------
 @app.route("/api/export")
 def export():
-    """导出 MySQL 中的沸点+评论为 Excel（格式与抓取脚本一致：评论合并进主表）"""
+    """导出 MySQL 中的沸点+评论为 Excel（评论合并进主表）"""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
@@ -233,6 +414,7 @@ def export():
 
     df = pd.DataFrame(merged_rows)
     filename = f"沸点热门_{datetime.datetime.now():%Y%m%d_%H%M%S}.xlsx"
+    os.makedirs(DATA_DIR, exist_ok=True)
     out_path = os.path.join(DATA_DIR, filename)
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         df.to_excel(writer, index=False, sheet_name="沸点热门")
@@ -246,8 +428,18 @@ def export():
 
 
 if __name__ == "__main__":
-    if not os.environ.get("MYSQL_PASSWORD"):
-        print("请先设置环境变量 MYSQL_PASSWORD")
+    try:  # 启动预检: 配置/密码/服务 在这里直接报出来
+        get_conn().close()
+    except pymysql.err.OperationalError as e:
+        code = e.args[0] if e.args else 0
+        hint = {1045: "MySQL 密码未配置或错误, 请编辑 config.json 填 mysql.password",
+                2003: "无法连接 MySQL, 请确认服务已启动"}.get(code, str(e))
+        print(f"MySQL 预检失败: {hint}")
         raise SystemExit(1)
-    print("启动成功: http://127.0.0.1:5000")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+    # 恢复上次保存的定时抓取设置
+    _interval = int(load_config().get("scrape_interval", 0) or 0)
+    if _interval > 0:
+        start_scheduler(_interval)
+        print(f"已恢复定时抓取: 每 {_interval} 秒一次")
+    print("MySQL 预检通过, 启动成功: http://127.0.0.1:5000")
+    app.run(host="127.0.0.1", port=5000, debug=False, use_reloader=False)

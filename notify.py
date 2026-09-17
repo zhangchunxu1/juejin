@@ -6,7 +6,9 @@ import datetime
 import os
 import subprocess
 
-FLAG_DIR = r"D:\11\juejin\data\notify_flags"
+# 标记目录: 项目目录下 data\notify_flags（随项目自动定位，搬家后无需再改）
+PROJ_DIR = os.path.dirname(os.path.abspath(__file__))
+FLAG_DIR = os.path.join(PROJ_DIR, "data", "notify_flags")
 
 
 def notify(title, message):

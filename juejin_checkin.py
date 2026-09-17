@@ -3,7 +3,7 @@ r"""
 掘金每日自动签到 + 免费抽奖
 前置: 先运行 python login_save.py juejin 手动登录一次
 用法: python juejin_checkin.py
-签到记录保存在 D:\11\juejin\data\checkin_log.json
+签到记录保存在 项目目录\data\checkin_log.json
 """
 import os
 import json
@@ -12,7 +12,9 @@ from playwright.sync_api import sync_playwright
 
 from notify import notify, notify_once
 
-DATA_DIR = r"D:\11\juejin\data"
+# 数据目录: 脚本所在目录下的 data（项目整体搬家后无需再改）
+PROJ_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_DIR = os.path.join(PROJ_DIR, "data")
 AUTH_PATH = os.path.join(DATA_DIR, "auth_juejin.json")
 LOG_PATH = os.path.join(DATA_DIR, "checkin_log.json")
 SIGNIN_URL = "https://juejin.cn/user/center/signin"

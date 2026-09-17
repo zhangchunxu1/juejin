@@ -1,0 +1,11 @@
+# 密码不入库（config.json 含 MySQL 密码，示例文件除外）
+config.json
+
+# 运行产生的数据
+data/
+__pycache__/
+*.pyc
+
+# 日志与导出
+*.log
+data/*.xlsx
