@@ -39,6 +39,9 @@
   <div class="header">
     <h2>掘金沸点数据看板</h2>
     <span class="sub" v-if="overview.last_crawl">最近抓取：{{ overview.last_crawl }}</span>
+    <el-badge :value="pushBadge" :hidden="!pushBadge" style="margin-left:auto">
+      <el-button type="primary" plain @click="openPush">推送中心</el-button>
+    </el-badge>
   </div>
 
   <!-- 统计卡片 -->
@@ -72,7 +75,23 @@
         {{ scrape.running ? '抓取中...' : '开始抓取' }}
       </el-button>
       <span class="sub" style="color:#8a919f;font-size:12px">评论数 0 = 不抓评论；勾选"全部"则抓完该帖所有评论</span>
-      <el-collapse style="margin-left:auto;min-width:220px;border:none">
+    </div>
+    <div class="toolbar" style="flex-wrap: wrap;margin-top:8px;">
+      <div class="form-item">
+        <span>发布日期</span>
+        <el-radio-group v-model="cfg.dateType" size="small">
+          <el-radio-button label="all">不限</el-radio-button>
+          <el-radio-button label="today">今天</el-radio-button>
+          <el-radio-button label="yesterday">昨天</el-radio-button>
+          <el-radio-button label="custom">指定</el-radio-button>
+        </el-radio-group>
+        <el-date-picker v-if="cfg.dateType === 'custom'" v-model="cfg.customDate"
+                        type="date" placeholder="选日期" value-format="YYYY-MM-DD"
+                        :disabled-date="(d) => d.getTime() > Date.now()"
+                        size="small" style="width:140px;margin-left:8px"></el-date-picker>
+        <span class="sub" style="color:#8a919f;font-size:12px">选日期后只在热门榜里保留该天发布的沸点；翻完榜没有就提示 0 条</span>
+      </div>
+      <el-collapse style="min-width:220px;border:none">
         <el-collapse-item title="高级设置（抓取节奏）" name="speed" style="font-size:13px">
           <div class="form-item" style="margin-bottom:8px">
             <span style="width:110px">并发线程数</span>
@@ -165,12 +184,32 @@
   <div class="panel">
     <h3>沸点列表</h3>
     <div class="toolbar" style="flex-wrap:wrap;">
-      <el-input v-model="keyword" placeholder="搜索内容 / 作者" clearable style="width: 220px"
+      <el-input v-model="keyword" placeholder="搜索内容 / 作者" clearable style="width: 200px"
                 @keyup.enter="loadPins(1)" @clear="loadPins(1)"></el-input>
+      <el-input v-model="authorKw" placeholder="作者(可只填一部分)" clearable style="width: 160px"
+                @keyup.enter="loadPins(1)" @clear="loadPins(1)"></el-input>
+      <el-select v-model="job" placeholder="职业" clearable size="default" style="width: 130px"
+                 @change="loadPins(1)">
+        <el-option v-for="j in jobOptions" :key="j" :label="j" :value="j"></el-option>
+      </el-select>
+      <el-select v-model="minDiggs" placeholder="点赞≥" clearable size="default" style="width: 110px"
+                 @change="loadPins(1)">
+        <el-option v-for="v in [10, 50, 100, 500, 1000]" :key="v" :label="v + '+'" :value="v"></el-option>
+      </el-select>
+      <el-select v-model="minComments" placeholder="评论≥" clearable size="default" style="width: 110px"
+                 @change="loadPins(1)">
+        <el-option v-for="v in [5, 10, 50, 100]" :key="v" :label="v + '+'" :value="v"></el-option>
+      </el-select>
+      <el-date-picker v-model="crawlRange" type="daterange" range-separator="~"
+                      start-placeholder="获取开始" end-placeholder="获取结束"
+                      value-format="YYYY-MM-DD" :clearable="true" size="default"
+                      style="width: 240px" @change="loadPins(1)"></el-date-picker>
       <el-button type="primary" @click="loadPins(1)">搜索</el-button>
-      <el-button @click="loadPins()">刷新</el-button>
+      <el-button @click="resetFilters">重置</el-button>
+      <el-button :loading="loading" @click="loadPins()">刷新</el-button>
       <el-button type="success" :loading="exporting" @click="exportExcel">导出 Excel</el-button>
-      <span style="width:12px"></span>
+    </div>
+    <div class="toolbar" style="flex-wrap:wrap;align-items:center;">
       <span class="sub" style="color:#8a919f;font-size:13px">发布时间:</span>
       <el-radio-group v-model="days" size="small" @change="loadPins(1)">
         <el-radio-button :value="0">全部</el-radio-button>
@@ -179,6 +218,16 @@
         <el-radio-button :value="7">近7天</el-radio-button>
         <el-radio-button :value="30">近30天</el-radio-button>
       </el-radio-group>
+      <span class="sub" style="color:#8a919f;font-size:13px;margin-left:6px">获取日期:</span>
+      <el-radio-group v-model="crawlDays" size="small" @change="loadPins(1)">
+        <el-radio-button :value="0">全部</el-radio-button>
+        <el-radio-button :value="1">今天</el-radio-button>
+        <el-radio-button :value="3">近3天</el-radio-button>
+        <el-radio-button :value="7">近7天</el-radio-button>
+      </el-radio-group>
+      <span v-if="total > 0" class="sub" style="color:#8a919f;font-size:13px;margin-left:auto">
+        筛出 {{ total }} 条
+      </span>
     </div>
     <el-table :data="pins" v-loading="loading" stripe @sort-change="onSort">
       <el-table-column type="index" label="#" width="50"></el-table-column>
@@ -188,14 +237,19 @@
           <div class="content-cell">{{ row.content }}</div>
         </template>
       </el-table-column>
-      <el-table-column prop="digg_count" label="点赞" width="90" sortable="custom"></el-table-column>
-      <el-table-column prop="comment_count" label="评论" width="90" sortable="custom">
+      <el-table-column prop="digg_count" label="点赞" width="80" sortable="custom"></el-table-column>
+      <el-table-column prop="comment_count" label="评论" width="80" sortable="custom">
         <template #default="{ row }">
           <el-link type="primary" @click="openComments(row)">{{ row.comment_count }}</el-link>
         </template>
       </el-table-column>
-      <el-table-column prop="publish_time" label="发布时间" width="165" sortable="custom"></el-table-column>
-      <el-table-column label="链接" width="70">
+      <el-table-column prop="publish_time" label="发布时间" width="105" sortable="custom">
+        <template #default="{ row }">{{ (row.publish_time || '').slice(0, 16) }}</template>
+      </el-table-column>
+      <el-table-column prop="first_crawl_time" label="获取时间" width="105" sortable="custom">
+        <template #default="{ row }">{{ (row.first_crawl_time || '').slice(0, 16) }}</template>
+      </el-table-column>
+      <el-table-column label="链接" width="60">
         <template #default="{ row }">
           <a :href="row.pin_url" target="_blank">原文</a>
         </template>
@@ -223,6 +277,101 @@
       <el-table-column prop="comment_time" label="时间" width="160"></el-table-column>
     </el-table>
   </el-drawer>
+
+  <!-- 推送中心抽屉 -->
+  <el-drawer v-model="pushDrawer" title="推送中心 · 关键词命中主动推" size="480px">
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div>
+        <div style="font-size:13px;color:#515767;margin-bottom:6px">
+          总开关
+          <span style="color:#8a919f;font-size:12px">关闭后抓取完成不再自动巡检</span>
+        </div>
+        <el-switch v-model="pushCfg.enabled" @change="savePushCfg"></el-switch>
+      </div>
+
+      <div>
+        <div style="font-size:13px;color:#515767;margin-bottom:6px">
+          关注关键词
+          <span style="color:#8a919f;font-size:12px">新沸点/新评论命中任一个就推送</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:8px">
+          <el-input v-model="newKeyword" placeholder="输入关键词回车添加，如: 内推 / 裁员 / AI"
+                    style="flex:1" @keyup.enter="addKeyword" clearable></el-input>
+          <el-button type="primary" @click="addKeyword">添加</el-button>
+        </div>
+        <div v-if="pushCfg.keywords.length === 0" style="font-size:12px;color:#8a919f">
+          还没有关键词，添加后每次抓取完成会自动巡检新数据
+        </div>
+        <el-tag v-for="k in pushCfg.keywords" :key="k" closable style="margin:0 8px 8px 0"
+                @close="removeKeyword(k)">{{ k }}</el-tag>
+      </div>
+
+      <el-divider style="margin:4px 0"></el-divider>
+
+      <div>
+        <div style="font-size:13px;color:#515767;margin-bottom:6px">推送通道</div>
+        <div class="form-item" style="margin-bottom:8px">
+          <el-switch v-model="pushCfg.desktop" size="small" @change="savePushCfg"></el-switch>
+          <span style="font-size:13px">Windows 桌面通知</span>
+          <el-button size="small" style="margin-left:8px" @click="testPush('desktop')">测试</el-button>
+        </div>
+        <div class="form-item" style="margin-bottom:8px">
+          <el-switch v-model="pushCfg.serverchan" size="small" @change="savePushCfg"></el-switch>
+          <span style="font-size:13px">微信（Server酱）</span>
+        </div>
+        <div v-if="pushCfg.serverchan" style="display:flex;gap:8px;align-items:center">
+          <el-input v-model="pushCfg.serverchan_key" placeholder="SendKey，如 SCTxxxx"
+                    style="flex:1" size="small"></el-input>
+          <el-button size="small" @click="savePushCfg">保存</el-button>
+          <el-button size="small" @click="testPush('serverchan')">测试</el-button>
+        </div>
+        <div v-if="pushCfg.serverchan" style="font-size:12px;color:#8a919f;margin-top:4px">
+          免费申请: sct.ftqq.com 微信扫码登录即得 SendKey（每天 5 条免费额度，够用）
+        </div>
+      </div>
+
+      <el-divider style="margin:4px 0"></el-divider>
+
+      <div>
+        <div style="font-size:13px;color:#515767;margin-bottom:6px">巡检范围</div>
+        <div class="form-item">
+          <el-checkbox v-model="pushCfg.scan_pins" @change="savePushCfg">新沸点</el-checkbox>
+          <el-checkbox v-model="pushCfg.scan_comments" @change="savePushCfg">新评论（含楼中楼）</el-checkbox>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center">
+        <el-button type="primary" :loading="pushRunning" @click="runPushCheck">立即巡检</el-button>
+        <el-button @click="loadPushLogs">刷新记录</el-button>
+        <span style="font-size:12px;color:#8a919f">平时抓取完成会自动巡检，无需手动点</span>
+      </div>
+
+      <div>
+        <div style="font-size:13px;color:#515767;margin-bottom:6px">推送记录（最近 50 条）</div>
+        <el-table :data="pushLogs" size="small" stripe max-height="360"
+                  :empty-text="'暂无推送记录。命中关键词后会出现在这里'">
+          <el-table-column prop="time" label="时间" width="140">
+            <template #default="{ row }">{{ (row.time || '').slice(5, 16) }}</template>
+          </el-table-column>
+          <el-table-column prop="title" label="内容" min-width="180">
+            <template #default="{ row }">
+              <el-tooltip :content="row.message" placement="top" :show-after="300">
+                <span style="cursor:default">{{ row.title }}</span>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column label="命中" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" type="warning">{{ row.matched }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="通道" width="80">
+            <template #default="{ row }">{{ row.channel || '桌面' }}</template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </div>
+  </el-drawer>
 </div>
 
 <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
@@ -239,6 +388,13 @@ createApp({
     const page = ref(1);
     const size = ref(10);
     const keyword = ref('');
+    const authorKw = ref('');
+    const job = ref('');
+    const jobOptions = ref([]);
+    const minDiggs = ref(null);
+    const minComments = ref(null);
+    const crawlRange = ref(null);
+    const crawlDays = ref(0);
     const days = ref(0);
     const sort = ref('publish_time');
     const order = ref('desc');
@@ -249,7 +405,7 @@ createApp({
     const currentPin = ref(null);
     const pinChart = ref(null);
     const authorChart = ref(null);
-    const cfg = ref({ total: 50, comments: 20, allComments: false });
+    const cfg = ref({ total: 50, comments: 20, allComments: false, dateType: 'all', customDate: '' });
     const scrape = ref({ running: false, log: '' });
     const exporting = ref(false);
     const checkin = ref({ running: false, log: '', last: null });
@@ -257,6 +413,13 @@ createApp({
     const schedule = ref({ on: false, interval: 1800, customMin: 60, nextRun: null });
     const lotteryCfg = ref({ usePoints: false, maxPaid: 1 });
     const speed = ref({ workers: 5, pageDelay: 0.3, pinDelay: 0.5 });
+    const pushDrawer = ref(false);
+    const pushCfg = ref({ enabled: true, keywords: [], desktop: true, serverchan: false,
+                          serverchan_key: '', scan_pins: true, scan_comments: true });
+    const pushLogs = ref([]);
+    const pushRunning = ref(false);
+    const newKeyword = ref('');
+    const pushBadge = ref('');
     let pollTimer = null;
     let checkinTimer = null;
 
@@ -427,6 +590,16 @@ createApp({
     }
 
     async function startScrape() {
+      let date = '';
+      if (cfg.value.dateType === 'today') date = 'today';
+      else if (cfg.value.dateType === 'yesterday') date = 'yesterday';
+      else if (cfg.value.dateType === 'custom') {
+        if (!cfg.value.customDate) {
+          ElementPlus.ElMessage.warning('请先选择具体日期');
+          return;
+        }
+        date = cfg.value.customDate;
+      }
       try {
         const r = await fetch('/api/scrape', {
           method: 'POST',
@@ -434,6 +607,7 @@ createApp({
           body: JSON.stringify({
             total: cfg.value.total,
             comments: cfg.value.allComments ? -1 : cfg.value.comments,
+            date,
           }),
         }).then(r => r.json());
         if (!r.ok) { ElementPlus.ElMessage.warning(r.msg || '启动失败'); return; }
@@ -499,6 +673,11 @@ createApp({
           page: page.value, size: size.value,
           keyword: keyword.value, sort: sort.value, order: order.value,
           days: days.value,
+          author: authorKw.value, job: job.value,
+          min_diggs: minDiggs.value ?? '', min_comments: minComments.value ?? '',
+          crawl_days: crawlDays.value,
+          crawl_start: (crawlRange.value && crawlRange.value[0]) || '',
+          crawl_end: (crawlRange.value && crawlRange.value[1]) || '',
         });
         const r = await fetch('/api/pins?' + params).then(r => r.json());
         pins.value = r.rows;
@@ -506,6 +685,20 @@ createApp({
       } finally {
         loading.value = false;
       }
+    }
+
+    async function loadJobs() {
+      try {
+        const r = await fetch('/api/jobs').then(r => r.json());
+        jobOptions.value = r.jobs || [];
+      } catch (e) {}
+    }
+
+    function resetFilters() {
+      keyword.value = ''; authorKw.value = ''; job.value = '';
+      minDiggs.value = null; minComments.value = null;
+      crawlRange.value = null; crawlDays.value = 0; days.value = 0;
+      loadPins(1);
     }
 
     function onSort({ prop, order: o }) {
@@ -527,14 +720,101 @@ createApp({
       }
     }
 
-    onMounted(() => { loadStats(); loadPins(); loadAuth(); loadSchedule(); loadLotteryCfg(); loadSpeed(); });
+    async function openPush() {
+      pushDrawer.value = true;
+      await loadPushCfg();
+      await loadPushLogs();
+    }
+
+    async function loadPushCfg() {
+      try {
+        const r = await fetch('/api/push/config').then(r => r.json());
+        if (r.push) pushCfg.value = { ...pushCfg.value, ...r.push };
+      } catch (e) {}
+    }
+
+    async function savePushCfg() {
+      try {
+        const r = await fetch('/api/push/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(pushCfg.value),
+        }).then(r => r.json());
+        if (r.ok) ElementPlus.ElMessage.success(r.msg);
+        else ElementPlus.ElMessage.warning(r.msg || '保存失败');
+      } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
+    }
+
+    function addKeyword() {
+      const k = (newKeyword.value || '').trim();
+      if (!k) return;
+      if (pushCfg.value.keywords.includes(k)) {
+        ElementPlus.ElMessage.warning('关键词已存在');
+        return;
+      }
+      if (pushCfg.value.keywords.length >= 30) {
+        ElementPlus.ElMessage.warning('最多 30 个关键词');
+        return;
+      }
+      pushCfg.value.keywords.push(k);
+      newKeyword.value = '';
+      savePushCfg();
+    }
+
+    function removeKeyword(k) {
+      pushCfg.value.keywords = pushCfg.value.keywords.filter(x => x !== k);
+      savePushCfg();
+    }
+
+    async function testPush(channel) {
+      // 先保存当前输入（如 SendKey 刚填还没保存）
+      await savePushCfg();
+      try {
+        const r = await fetch('/api/push/test', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ channel }),
+        }).then(r => r.json());
+        if (r.ok) ElementPlus.ElMessage.success(r.msg);
+        else ElementPlus.ElMessage.warning(r.msg || '发送失败');
+      } catch (e) { ElementPlus.ElMessage.error('发送失败: ' + e); }
+    }
+
+    async function runPushCheck() {
+      pushRunning.value = true;
+      try {
+        const r = await fetch('/api/push/run', { method: 'POST' }).then(r => r.json());
+        if (!r.ok) { ElementPlus.ElMessage.warning(r.msg); return; }
+        await new Promise(res => setTimeout(res, 3000));
+        await loadPushLogs();
+        ElementPlus.ElMessage.success('巡检完成（命中会弹通知并记录）');
+      } catch (e) {
+        ElementPlus.ElMessage.error('巡检失败: ' + e);
+      } finally {
+        pushRunning.value = false;
+      }
+    }
+
+    async function loadPushLogs() {
+      try {
+        const r = await fetch('/api/push/status').then(r => r.json());
+        pushLogs.value = r.logs || [];
+      } catch (e) {}
+    }
+
+    onMounted(() => { loadStats(); loadPins(); loadAuth(); loadSchedule(); loadLotteryCfg(); loadSpeed(); loadJobs(); loadPushCfg(); });
 
     return { overview, pins, total, page, size, keyword, days, loading,
+             authorKw, job, jobOptions, minDiggs, minComments, crawlRange, crawlDays,
+             resetFilters,
              drawer, comments, commentLoading, currentPin,
              pinChart, authorChart, cfg, scrape, exporting, startScrape, exportExcel,
              loadPins, onSort, openComments,
              checkin, auth, schedule, openLogin, startCheckin, saveSchedule, saveCustomSchedule,
-             lotteryCfg, saveLotteryCfg, speed, loadSpeed, saveSpeed, resetSpeed };
+             lotteryCfg, saveLotteryCfg, speed, loadSpeed, saveSpeed, resetSpeed,
+             pushDrawer, pushCfg, pushLogs, pushRunning, newKeyword, pushBadge,
+             openPush, loadPushCfg, savePushCfg, addKeyword, removeKeyword,
+             testPush, runPushCheck, loadPushLogs };
   },
 }).use(ElementPlus).mount('#app');
 </script>

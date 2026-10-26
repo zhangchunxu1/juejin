@@ -6,5 +6,19 @@
     "password": "在这里填你的MySQL密码",
     "database": "juejin"
   },
-  "scrape_interval": 0
+  "scrape_interval": 0,
+  "scrape": {
+    "workers": 5,
+    "page_delay": 0.3,
+    "pin_delay": 0.5
+  },
+  "push": {
+    "enabled": true,
+    "keywords": ["内推", "招聘"],
+    "desktop": true,
+    "serverchan": false,
+    "serverchan_key": "",
+    "scan_pins": true,
+    "scan_comments": true
+  }
 }

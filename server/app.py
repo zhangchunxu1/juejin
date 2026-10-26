@@ -24,6 +24,8 @@ PROJ_DIR = os.path.dirname(BASE_DIR)                    # ...\juejin（项目根
 sys.path.insert(0, PROJ_DIR)                            # 让 app 能 import 项目根的模块
 from jjconfig import DATA_DIR, AUTH_PATH, load_config, save_config, get_mysql_conf  # noqa: E402
 
+import monitor  # 关键词推送引擎（巡检/配置/记录 都走它）
+
 SCRAPER_PATH = os.path.join(PROJ_DIR, "juejin_pins.py")
 CHECKIN_PATH = os.path.join(PROJ_DIR, "juejin_checkin.py")
 LOGIN_PATH = os.path.join(PROJ_DIR, "login_save.py")
@@ -88,6 +90,9 @@ def run_script_job(job, script_path, args, finish_line):
             proc.wait()
             with job_lock:
                 job["log"] += "\n" + finish_line(proc.returncode)
+            # 抓取脚本跑完后自动关键词巡检一次（未配置关键词时静默跳过）
+            if job is scrape_job and proc.returncode == 0:
+                monitor.run_check_async()
         except Exception as exc:
             with job_lock:
                 job["log"] += f"\n任务异常: {exc}"
@@ -144,31 +149,85 @@ def stats():
         conn.close()
 
 
+@app.route("/api/jobs")
+def jobs():
+    """职业下拉选项（去重，按出现次数倒序）"""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""SELECT job_title, COUNT(*) AS c FROM pin
+                           WHERE job_title != '' GROUP BY job_title ORDER BY c DESC LIMIT 50""")
+            rows = cur.fetchall()
+        return jsonify({"jobs": [r["job_title"] for r in rows]})
+    finally:
+        conn.close()
+
+
 @app.route("/api/pins")
 def pins():
-    """沸点分页列表，支持关键词搜索、排序、发布时间范围筛选
-    days 参数: 0/缺省=全部, n=近 n 天（含今天）"""
+    """沸点分页列表，支持搜索与多维筛选
+    keyword: 内容/作者模糊; author: 作者模糊; job: 职业精确
+    days: 发布时间近 n 天; crawl_days: 获取时间近 n 天
+    crawl_start/crawl_end: 获取日期范围(YYYY-MM-DD)
+    min_diggs/min_comments: 点赞/评论数下限"""
     page = max(int(request.args.get("page", 1)), 1)
     size = min(max(int(request.args.get("size", 10)), 1), 100)
     keyword = request.args.get("keyword", "").strip()
+    author = request.args.get("author", "").strip()
+    job = request.args.get("job", "").strip()
     sort = request.args.get("sort", "publish_time")
     order = "ASC" if request.args.get("order") == "asc" else "DESC"
     sort_col = {"digg_count": "digg_count", "comment_count": "comment_count",
-                "publish_time": "publish_time", "crawl_time": "crawl_time"}.get(sort, "publish_time")
-    try:
-        days = int(request.args.get("days", 0) or 0)
-    except ValueError:
-        days = 0
-    if days < 0:
-        days = 0
+                "publish_time": "publish_time", "crawl_time": "crawl_time",
+                "first_crawl_time": "first_crawl_time"}.get(sort, "publish_time")
+
+    def _int_arg(name, default=0):
+        try:
+            return int(request.args.get(name, default) or default)
+        except (TypeError, ValueError):
+            return default
+
+    days = max(_int_arg("days"), 0)
+    crawl_days = max(_int_arg("crawl_days"), 0)
+    min_diggs = _int_arg("min_diggs", 0)
+    min_comments = _int_arg("min_comments", 0)
+    crawl_start = request.args.get("crawl_start", "").strip()
+    crawl_end = request.args.get("crawl_end", "").strip()
 
     conds, params = [], []
     if keyword:
         conds.append("(content LIKE %s OR author LIKE %s)")
         params += [f"%{keyword}%", f"%{keyword}%"]
+    if author:
+        conds.append("author LIKE %s")
+        params.append(f"%{author}%")
+    if job:
+        conds.append("job_title = %s")
+        params.append(job)
+    if min_diggs > 0:
+        conds.append("digg_count >= %s")
+        params.append(min_diggs)
+    if min_comments > 0:
+        conds.append("comment_count >= %s")
+        params.append(min_comments)
     if days > 0:
         conds.append("publish_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY)")
         params.append(days - 1)  # 近1天=今天(减0天), 近3天=前天起(减2天)
+    if crawl_days > 0:
+        conds.append("first_crawl_time >= DATE_SUB(CURDATE(), INTERVAL %s DAY)")
+        params.append(crawl_days - 1)
+    for col, val in (("first_crawl_time", crawl_start), ("first_crawl_time", crawl_end)):
+        if val:
+            try:
+                datetime.datetime.strptime(val, "%Y-%m-%d")
+            except ValueError:
+                return jsonify({"error": f"日期不合法: {val}"}), 400
+    if crawl_start:
+        conds.append("first_crawl_time >= %s")
+        params.append(f"{crawl_start} 00:00:00")
+    if crawl_end:
+        conds.append("first_crawl_time < DATE_ADD(%s, INTERVAL 1 DAY)")
+        params.append(f"{crawl_end} 00:00:00")
     where = ("WHERE " + " AND ".join(conds)) if conds else ""
 
     conn = get_conn()
@@ -179,7 +238,7 @@ def pins():
             cur.execute(
                 f"""SELECT msg_id, author, job_title, company, content,
                            digg_count, comment_count, pic_count,
-                           publish_time, pin_url, crawl_time
+                           publish_time, pin_url, crawl_time, first_crawl_time
                     FROM pin {where}
                     ORDER BY {sort_col} {order}
                     LIMIT %s OFFSET %s""",
@@ -187,7 +246,7 @@ def pins():
             )
             rows = cur.fetchall()
         for r in rows:
-            for k in ("publish_time", "crawl_time"):
+            for k in ("publish_time", "crawl_time", "first_crawl_time"):
                 if r[k] is not None:
                     r[k] = r[k].strftime("%Y-%m-%d %H:%M:%S")
         return jsonify({"total": total, "rows": rows})
@@ -219,7 +278,8 @@ def pin_comments(msg_id):
 # ---------------- 抓取 ----------------
 @app.route("/api/scrape", methods=["POST"])
 def scrape():
-    """启动抓取任务（后台线程跑脚本，前端轮询进度）"""
+    """启动抓取任务（后台线程跑脚本，前端轮询进度）
+    body: {total, comments, date?}  date 可为 today/yesterday/YYYY-MM-DD"""
     if scrape_job["running"]:
         return jsonify({"ok": False, "msg": "已有抓取任务在运行中"}), 409
 
@@ -227,14 +287,32 @@ def scrape():
     total = min(max(int(data.get("total", 50)), 1), 500)
     comments = min(max(int(data.get("comments", 20)), -1), 100)
 
+    # 日期过滤（可选）: 校验合法性后透传给脚本 --date
+    date_arg = str(data.get("date") or "").strip()
+    extra_args = []
+    date_label = ""
+    if date_arg:
+        d = date_arg.lower()
+        if d in ("today", "yesterday"):
+            extra_args = ["--date", d]
+            date_label = "今天" if d == "today" else "昨天"
+        else:
+            try:
+                dd = datetime.datetime.strptime(d.replace("/", "-"), "%Y-%m-%d").date()
+                extra_args = ["--date", str(dd)]
+                date_label = f"{dd:%Y-%m-%d}"
+            except ValueError:
+                return jsonify({"ok": False, "msg": f"日期不合法: {date_arg}"}), 400
+
     if not os.path.isfile(SCRAPER_PATH):
         return jsonify({"ok": False, "msg": f"未找到抓取脚本: {SCRAPER_PATH}"}), 400
 
-    head = f"启动: 沸点 {total} 条, 评论 {'全部' if comments < 0 else str(comments) + ' 条/帖'}\n"
+    head = (f"启动: 沸点 {total} 条, 评论 {'全部' if comments < 0 else str(comments) + ' 条/帖'}"
+            + (f", 只抓 {date_label} 发布\n" if date_label else "\n"))
     with job_lock:
         scrape_job["log"] = head
     run_script_job(scrape_job, SCRAPER_PATH,
-                   ["--total", str(total), "--comments", str(comments)],
+                   ["--total", str(total), "--comments", str(comments)] + extra_args,
                    lambda rc: "抓取完成" if rc == 0 else f"抓取失败(退出码 {rc})")
     return jsonify({"ok": True})
 
@@ -425,6 +503,68 @@ def schedule():
     start_scheduler(interval)
     return jsonify({"ok": True, "interval": interval,
                     "msg": f"定时抓取已{'设置为每 ' + str(interval) + ' 秒一次' if interval > 0 else '关闭'}"})
+
+
+# ---------------- 推送中心（关键词监控） ----------------
+@app.route("/api/push/config", methods=["GET", "POST"])
+def push_config():
+    """GET 读推送配置; POST 保存（只接受白名单字段）"""
+    if request.method == "GET":
+        return jsonify({"push": monitor.load_push_conf()})
+    data = request.get_json(force=True, silent=True) or {}
+    push = monitor.load_push_conf()
+    for key in ("enabled", "desktop", "serverchan", "scan_pins", "scan_comments"):
+        if key in data:
+            push[key] = bool(data[key])
+    if "serverchan_key" in data:
+        push["serverchan_key"] = str(data["serverchan_key"] or "").strip()
+    if "keywords" in data:
+        kws = data["keywords"]
+        if not isinstance(kws, list):
+            return jsonify({"ok": False, "msg": "keywords 必须是数组"}), 400
+        push["keywords"] = [str(k).strip() for k in kws
+                            if str(k).strip()][:30]
+    monitor.save_push_conf(push)
+    return jsonify({"ok": True, "push": push, "msg": "推送配置已保存"})
+
+
+@app.route("/api/push/run", methods=["POST"])
+def push_run():
+    """立即巡检一次（后台线程跑，前端用 /api/push/status 轮询结果）"""
+    def _run():
+        try:
+            monitor.check_once(verbose=False)
+        except Exception:
+            pass
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True, "msg": "巡检已启动"})
+
+
+@app.route("/api/push/status")
+def push_status():
+    """最近巡检结果 + 最近推送记录（推送中心抽屉刷新用）"""
+    logs = monitor._read_json(monitor.LOG_PATH, [])
+    if not isinstance(logs, list):
+        logs = []
+    return jsonify({"logs": logs[-50:][::-1]})
+
+
+@app.route("/api/push/test", methods=["POST"])
+def push_test():
+    """发一条测试通知验证桌面/微信通道"""
+    push = monitor.load_push_conf()
+    data = request.get_json(force=True, silent=True) or {}
+    channel = data.get("channel", "desktop")
+    if channel == "serverchan":
+        key = (push.get("serverchan_key") or "").strip()
+        if not key:
+            return jsonify({"ok": False, "msg": "请先填写 Server酱 SendKey"}), 400
+        ok = monitor.serverchan_send(key, "掘金推送中心 · 测试",
+                                     "看到这条消息说明微信通道正常。之后关键词命中会推到这里。")
+        return (jsonify({"ok": True, "msg": "测试消息已发送，请在微信查收"}) if ok
+                else jsonify({"ok": False, "msg": "发送失败: SendKey 无效或网络异常"}))
+    monitor.notify("掘金推送中心 · 测试", "看到这条消息说明桌面通知通道正常。之后关键词命中会弹到这里。")
+    return jsonify({"ok": True, "msg": "测试通知已弹出"})
 
 
 # ---------------- 导出 ----------------

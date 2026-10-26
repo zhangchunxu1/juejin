@@ -35,6 +35,16 @@ TEMPLATE = {
         "page_delay": 0.3,
         "pin_delay": 0.5,
     },
+    # 关键词推送（网页"推送中心"可视化编辑；详细字段见 monitor.py 的 PUSH_DEFAULTS）
+    "push": {
+        "enabled": True,            # 总开关（关闭后抓取完成不再自动巡检）
+        "keywords": ["内推", "招聘"],  # 关注的关键词，命中即推
+        "desktop": True,            # Windows 桌面通知
+        "serverchan": False,        # 微信推送（Server酱，需填 key）
+        "serverchan_key": "",       # Server酱 SendKey，如 SCTxxxx
+        "scan_pins": True,          # 巡检新沸点
+        "scan_comments": True,      # 巡检新评论
+    },
 }
 
 

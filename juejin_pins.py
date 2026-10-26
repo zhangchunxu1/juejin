@@ -10,7 +10,10 @@
   python juejin_pins.py                        # 默认配置
   python juejin_pins.py --total 100            # 抓 100 条沸点
   python juejin_pins.py --total 50 --comments -1   # 全部评论
-入库需设置环境变量 MYSQL_PASSWORD
+  python juejin_pins.py --date today           # 只抓今天发布的（配合 --total 限条数）
+  python juejin_pins.py --date yesterday --total 30
+  python juejin_pins.py --date 2026-09-18 --comments -1   # 指定某天 + 全部评论
+入库: MySQL 密码优先读环境变量 MYSQL_PASSWORD，未设置则读 config.json 的 mysql.password
 """
 import os
 import json
@@ -26,6 +29,7 @@ import pymysql
 import requests
 
 from notify import notify, notify_once
+from jjconfig import get_mysql_conf as _jj_mysql_conf
 
 # Windows 控制台默认 GBK，print 内容含 emoji 时会 UnicodeEncodeError 崩溃。
 # 统一强制 stdout/stderr 走 UTF-8（chcp 65001 效果，写不进去也不影响运行）。
@@ -71,22 +75,21 @@ def _load_speed_overrides():
 
 _load_speed_overrides()
 
-# MySQL 配置：非敏感项写在这里，密码从环境变量 MYSQL_PASSWORD 读取（不落盘）
+# MySQL 开关：True 时抓取结果写入 MySQL（密码读取见 load_mysql_conf）
 SAVE_TO_MYSQL = True
-MYSQL_CONF = {
-    "host": "127.0.0.1",
-    "port": 3306,
-    "user": "root",
-    "db": "juejin",
-}
 
 
 def load_mysql_conf():
-    """读取 MySQL 配置，密码取自环境变量 MYSQL_PASSWORD"""
-    password = (os.environ.get("MYSQL_PASSWORD") or "").strip()  # strip: 防cmd set尾随空格
-    if not password:
+    """读取 MySQL 配置：环境变量 MYSQL_PASSWORD 优先，其次 config.json 的 mysql.password
+    （统一走 jjconfig，与看板 server/app.py 的取密码逻辑一致）"""
+    conf = _jj_mysql_conf()
+    if not conf:
         return None
-    return {**MYSQL_CONF, "password": password}
+    return {
+        "host": conf["host"], "port": conf["port"],
+        "user": conf["user"], "password": conf["password"],
+        "db": conf["database"],
+    }
 # ================================
 
 AUTH_PATH = os.path.join(DATA_DIR, "auth_juejin.json")
@@ -132,13 +135,45 @@ def api_post(url, body, retries=2):
 
 
 # ============ 沸点列表 ============
-def fetch_pins(total_want):
-    """分页抓取沸点列表"""
+def parse_date_arg(s):
+    """把 --date 参数解析成 (起始datetime, 结束datetime)；不合法返回 None。
+    支持: today / yesterday / 2026-09-18（也认 20260918）"""
+    s = (s or "").strip().lower()
+    if not s:
+        return None
+    today = datetime.date.today()
+    if s == "today":
+        d = today
+    elif s in ("yesterday", "yest"):
+        d = today - datetime.timedelta(days=1)
+    else:
+        s2 = s.replace("/", "-")
+        if len(s2) == 8 and s2.isdigit():  # 20260918 -> 2026-09-18
+            s2 = f"{s2[:4]}-{s2[4:6]}-{s2[6:]}"
+        try:
+            d = datetime.datetime.strptime(s2, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+    start = datetime.datetime.combine(d, datetime.time.min)
+    end = start + datetime.timedelta(days=1)
+    return start, end
+
+
+def fetch_pins(total_want, date_range=None, scan_limit=2000):
+    """分页抓取沸点列表
+    date_range: (start, end) 只保留发布时间在 [start, end) 内的沸点（None = 不过滤）
+    scan_limit: 过滤模式下最多翻看多少条原始沸点（防死循环翻页）"""
+    if date_range:
+        print(f"日期过滤: 只保留 {date_range[0]:%Y-%m-%d} 发布的沸点"
+              f"（最多翻看 {scan_limit} 条，抓满 {total_want} 条为止）")
     items = []
     seen_ids = set()
+    scanned = 0
     cursor = "0"
     page_no = 0
-    while len(items) < total_want:
+    stop_scan = False  # 连续 N 页无匹配就提前停（热门榜大体按热度排，翻深了基本没有了）
+    empty_pages = 0
+    while len(items) < total_want and scanned < scan_limit and not stop_scan:
         page_no += 1
         resp = api_post(PIN_API, {
             "id_type": 4, "sort_type": 200, "cursor": cursor, "limit": PAGE_SIZE,
@@ -147,14 +182,34 @@ def fetch_pins(total_want):
             print(f"第 {page_no} 页请求失败")
             break
         data = resp.get("data") or []
-        print(f"第 {page_no} 页: 获取 {len(data)} 条")
+        print(f"第 {page_no} 页: 获取 {len(data)} 条", end="")
         if not data:
+            print()
             break
+        matched = 0
         for it in data:
             msg_id = it.get("msg_Info", {}).get("msg_id")
-            if msg_id and msg_id not in seen_ids:
-                seen_ids.add(msg_id)
-                items.append(it)
+            if not msg_id or msg_id in seen_ids:
+                continue
+            seen_ids.add(msg_id)
+            scanned += 1
+            if date_range:
+                try:
+                    ctime = datetime.datetime.fromtimestamp(int(it["msg_Info"].get("ctime", 0)))
+                except Exception:
+                    continue
+                if not (date_range[0] <= ctime < date_range[1]):
+                    continue
+                matched += 1
+            items.append(it)
+        if date_range:
+            print(f"，命中 {matched} 条（累计 {len(items)}/{total_want}）")
+            empty_pages = empty_pages + 1 if matched == 0 else 0
+            if empty_pages >= 15:  # 连续 15 页(约300条)无命中，再翻意义不大
+                print("连续多页无匹配，提前结束翻页")
+                stop_scan = True
+        else:
+            print()
         if not resp.get("has_more"):
             break
         cursor = resp.get("cursor", "0")
@@ -462,11 +517,22 @@ def main():
                         help="每条沸点评论数，0=不抓，-1=全部")
     parser.add_argument("--refresh-days", dest="refresh_days", type=int, default=0,
                         help="评论巡检：重刷近 N 天发布沸点的全部评论，0=不巡检")
+    parser.add_argument("--date", default="",
+                        help="只抓该日期发布的沸点: today / yesterday / 2026-09-18")
+    parser.add_argument("--scan", type=int, default=2000,
+                        help="日期过滤时最多翻看多少条沸点（默认 2000）")
     parser.add_argument("--no-excel", dest="no_excel", action="store_true",
                         help="不导出 Excel（计划任务用，避免文件堆积）")
     args = parser.parse_args()
     total_want = args.total
     comments_want = 10 ** 9 if args.comments < 0 else args.comments
+
+    date_range = None
+    if args.date:
+        date_range = parse_date_arg(args.date)
+        if not date_range:
+            print(f"--date 参数不合法: {args.date}（可用 today / yesterday / 2026-09-18）")
+            sys.exit(2)
 
     start_time = time.time()
 
@@ -476,11 +542,15 @@ def main():
         print("未找到登录状态，按游客身份抓取")
 
     # ============ 沸点列表 ============
-    items = fetch_pins(total_want)
+    items = fetch_pins(total_want, date_range=date_range, scan_limit=max(args.scan, total_want))
     if not items:
-        print("未获取到数据")
-        notify_once("pins_empty", "掘金抓取异常",
-                    "本次抓取 0 条沸点：cookie 可能已过期、被风控或网络异常")
+        if date_range:
+            print(f"热门榜翻看范围内没有 {date_range[0]:%Y-%m-%d} 发布的沸点"
+                  f"（该日内容可能没上过热门榜，或翻看深度不足，可用 --scan 调大）")
+        else:
+            print("未获取到数据")
+            notify_once("pins_empty", "掘金抓取异常",
+                        "本次抓取 0 条沸点：cookie 可能已过期、被风控或网络异常")
         return
     print(f"沸点共 {len(items)} 条，耗时 {time.time() - start_time:.1f}s")
 
@@ -549,7 +619,8 @@ def main():
     df = df.drop(columns=["msg_id", "comment_id", "parent_id"], errors="ignore")
 
     if not args.no_excel:
-        filename = f"沸点热门_{datetime.datetime.now():%Y%m%d_%H%M%S}.xlsx"
+        date_tag = f"_{date_range[0]:%Y%m%d}" if date_range else ""
+        filename = f"沸点热门{date_tag}_{datetime.datetime.now():%Y%m%d_%H%M%S}.xlsx"
         out_path = os.path.join(DATA_DIR, filename)
         with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
             df.to_excel(writer, index=False, sheet_name="沸点热门")

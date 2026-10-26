@@ -44,5 +44,231 @@
     "cont_days": 3,
     "total_days": 7,
     "points": 2106
+  },
+  {
+    "time": "2026-09-18 09:44:22",
+    "mode": "checkin",
+    "status": "签到成功",
+    "cont_days": 4,
+    "total_days": 8,
+    "points": 2106
+  },
+  {
+    "time": "2026-09-18 09:45:43",
+    "mode": "lottery",
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2106
+  },
+  {
+    "time": "2026-09-20 09:27:54",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 1,
+    "total_days": 9,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2106
+  },
+  {
+    "time": "2026-09-20 09:29:53",
+    "mode": "all",
+    "status": "今日已签到（无需重复操作）",
+    "cont_days": 1,
+    "total_days": 9,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2106
+  },
+  {
+    "time": "2026-09-20 15:30:41",
+    "mode": "checkin",
+    "status": "今日已签到（无需重复操作）",
+    "cont_days": 1,
+    "total_days": 9,
+    "points": 2106
+  },
+  {
+    "time": "2026-09-21 10:51:22",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 2,
+    "total_days": 10,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2106
+  },
+  {
+    "time": "2026-09-22 09:16:57",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 3,
+    "total_days": 11,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2178
+  },
+  {
+    "time": "2026-09-22 10:08:11",
+    "mode": "lottery",
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2178
+  },
+  {
+    "time": "2026-09-23 09:59:58",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 4,
+    "total_days": 12,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2178
+  },
+  {
+    "time": "2026-09-28 13:33:15",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 1,
+    "total_days": 14,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2194
+  },
+  {
+    "time": "2026-09-29 14:09:32",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 2,
+    "total_days": 15,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2195
+  },
+  {
+    "time": "2026-09-30 14:53:42",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 3,
+    "total_days": 16,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2196
+  },
+  {
+    "time": "2026-10-08 10:36:49",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 1,
+    "total_days": 17,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2197
+  },
+  {
+    "time": "2026-10-09 14:12:39",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 2,
+    "total_days": 18,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2198
+  },
+  {
+    "time": "2026-10-09 14:39:28",
+    "mode": "lottery",
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2198
+  },
+  {
+    "time": "2026-10-10 10:50:03",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 3,
+    "total_days": 19,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2199
+  },
+  {
+    "time": "2026-10-12 10:13:14",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 1,
+    "total_days": 20,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2200
+  },
+  {
+    "time": "2026-10-13 11:39:32",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 2,
+    "total_days": 21,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2201
+  },
+  {
+    "time": "2026-10-13 11:41:02",
+    "mode": "lottery",
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2201
+  },
+  {
+    "time": "2026-10-14 10:15:51",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 3,
+    "total_days": 22,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2202
+  },
+  {
+    "time": "2026-10-15 10:20:24",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 4,
+    "total_days": 23,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2203
+  },
+  {
+    "time": "2026-10-16 11:13:19",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 5,
+    "total_days": 24,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2204
+  },
+  {
+    "time": "2026-10-16 11:13:56",
+    "mode": "lottery",
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2204
+  },
+  {
+    "time": "2026-10-19 08:43:20",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 1,
+    "total_days": 25,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2205
+  },
+  {
+    "time": "2026-10-20 10:20:44",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 2,
+    "total_days": 26,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2206
+  },
+  {
+    "time": "2026-10-21 09:55:23",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 3,
+    "total_days": 27,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2207
+  },
+  {
+    "time": "2026-10-22 10:47:59",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 4,
+    "total_days": 28,
+    "lottery": "今日免费次数已用完，未抽奖（不消耗积分）",
+    "points": 2300
   }
 ]

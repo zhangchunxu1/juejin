@@ -31,4 +31,11 @@ if __name__ == "__main__":
     env = os.environ.copy()
     env["PYTHONIOENCODING"] = "utf-8"
     rc = subprocess.call([sys.executable, os.path.join(PROJ_DIR, "juejin_pins.py")] + args, env=env)
+    if rc == 0:
+        # 抓取成功后自动关键词巡检（未设置关键词/推送关闭时内部自动跳过）
+        try:
+            from monitor import check_once
+            check_once(verbose=False)
+        except Exception:
+            pass
     sys.exit(rc)
