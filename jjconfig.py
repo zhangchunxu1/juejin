@@ -104,6 +104,30 @@ def mysql_conf_for_pymysql():
     }
 
 
+def launch_playwright_browser(p, headless=True):
+    """启动 Chromium：优先 Playwright 自带内核，缺失时自动回退本机 Chrome / Edge。
+
+    p 为 sync_playwright() 上下文对象。pip 升级 playwright 后若没重新执行
+    playwright install chromium，自带内核路径会失效，此时直接用系统已装的
+    浏览器即可，不必让用户手动装内核。这里不 import playwright，零额外依赖。
+    """
+    errors = []
+    for kwargs in ({}, {"channel": "chrome"}, {"channel": "msedge"}):
+        name = kwargs.get("channel") or "Playwright 自带内核"
+        try:
+            browser = p.chromium.launch(headless=headless, **kwargs)
+            print(f"[浏览器] 使用 {name}")
+            return browser
+        except Exception as e:
+            first = (str(e).splitlines() or [repr(e)])[0]
+            errors.append(f"  - {name}: {first[:150]}")
+    raise RuntimeError(
+        "浏览器启动失败，已依次尝试 Playwright 自带内核 / 本机 Chrome / Edge。\n"
+        "解决: 在 cmd 里执行 playwright install chromium，或安装 Chrome / Edge。\n"
+        + "\n".join(errors)
+    )
+
+
 if __name__ == "__main__":
     # 自检: python jjconfig.py 显示当前配置(密码打码)
     c = load_config()

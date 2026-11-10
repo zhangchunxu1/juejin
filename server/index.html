@@ -119,21 +119,32 @@
     <div class="toolbar" style="margin-top:10px;flex-wrap:wrap;">
       <div class="form-item">
         <span>自动抓取</span>
-        <el-switch v-model="schedule.on" @change="saveSchedule"></el-switch>
+        <el-switch v-model="schedule.on" @change="onScheduleSwitch"></el-switch>
       </div>
-      <el-radio-group v-model="schedule.interval" size="small" @change="saveSchedule"
-                      :disabled="!schedule.on">
-        <el-radio-button :value="1800">30分钟</el-radio-button>
-        <el-radio-button :value="3600">1小时</el-radio-button>
-        <el-radio-button :value="7200">2小时</el-radio-button>
-        <el-radio-button :value="21600">6小时</el-radio-button>
-        <el-radio-button :value="43200">12小时</el-radio-button>
-        <el-radio-button :value="-1">自定义</el-radio-button>
-      </el-radio-group>
-      <div class="form-item" v-if="schedule.interval === -1">
-        <el-input-number v-model="schedule.customMin" :min="5" :max="1440" :step="5"
-                         style="width: 110px" size="small" @change="saveCustomSchedule"></el-input-number>
-        <span style="font-size:13px;color:#515767">分钟</span>
+      <div class="form-item">
+        <span>每隔</span>
+        <el-input-number v-model="schedule.minutes" :min="5" :max="1440" :precision="0"
+                         :step="schedule.stepMin" size="small" style="width:120px"
+                         class="schedule-minutes" :disabled="!schedule.on"
+                         @change="onMinutesChange"></el-input-number>
+        <span style="font-size:13px;color:#515767">分钟抓一次</span>
+        <el-select v-model="schedule.stepMin" size="small" style="width:118px;margin-left:6px"
+                   class="schedule-step" :disabled="!schedule.on" @change="saveStepMin">
+          <el-option :value="5" label="步长 5 分钟"></el-option>
+          <el-option :value="10" label="步长 10 分钟"></el-option>
+          <el-option :value="15" label="步长 15 分钟"></el-option>
+          <el-option :value="30" label="步长 30 分钟"></el-option>
+          <el-option :value="60" label="步长 60 分钟"></el-option>
+        </el-select>
+        <span class="sub" style="color:#8a919f;font-size:12px">点上下箭头按步长加减，也可直接输入，自动保存</span>
+      </div>
+      <div class="form-item">
+        <span class="sub" style="color:#8a919f;font-size:12px">快捷</span>
+        <el-button size="small" :disabled="!schedule.on" @click="setMinutes(10)">10分</el-button>
+        <el-button size="small" :disabled="!schedule.on" @click="setMinutes(30)">30分</el-button>
+        <el-button size="small" :disabled="!schedule.on" @click="setMinutes(60)">1时</el-button>
+        <el-button size="small" :disabled="!schedule.on" @click="setMinutes(120)">2时</el-button>
+        <el-button size="small" :disabled="!schedule.on" @click="setMinutes(360)">6时</el-button>
       </div>
       <span class="sub" style="color:#8a919f;font-size:12px" v-if="schedule.on && schedule.nextRun">
         下次: {{ schedule.nextRun }}
@@ -410,7 +421,7 @@ createApp({
     const exporting = ref(false);
     const checkin = ref({ running: false, log: '', last: null });
     const auth = ref({ exists: false, user_name: '', saved_at: '' });
-    const schedule = ref({ on: false, interval: 1800, customMin: 60, nextRun: null });
+    const schedule = ref({ on: false, minutes: 30, stepMin: 5, nextRun: null });
     const lotteryCfg = ref({ usePoints: false, maxPaid: 1 });
     const speed = ref({ workers: 5, pageDelay: 0.3, pinDelay: 0.5 });
     const pushDrawer = ref(false);
@@ -477,28 +488,33 @@ createApp({
       try {
         const r = await fetch('/api/schedule').then(r => r.json());
         schedule.value.on = r.interval > 0;
-        const presets = [1800, 3600, 7200, 21600, 43200];
-        if (presets.includes(r.interval)) {
-          schedule.value.interval = r.interval;
-        } else if (r.interval > 0) {           // 旧的自定义值 -> 回显到自定义档
-          schedule.value.interval = -1;
-          schedule.value.customMin = Math.max(5, Math.round(r.interval / 60));
+        // 后端存的是秒，回显成分钟；关闭时保留界面上上次填的值
+        if (r.interval > 0) {
+          schedule.value.minutes = Math.max(5, Math.min(1440, Math.round(r.interval / 60)));
         }
         schedule.value.nextRun = r.next_run;
       } catch (e) {}
     }
 
-    function currentIntervalSeconds() {
-      if (schedule.value.interval === -1) {
-        return Math.max(5, schedule.value.customMin || 60) * 60;  // 自定义分钟 -> 秒
-      }
-      return schedule.value.interval;
+    function loadStepMin() {
+      // 步长属于本机使用习惯，存 localStorage，不进后端配置
+      try {
+        const s = Number(localStorage.getItem('scheduleStepMin'));
+        if ([5, 10, 15, 30, 60].includes(s)) schedule.value.stepMin = s;
+      } catch (e) {}
     }
 
-    async function saveSchedule() {
-      if (schedule.value.interval === -1 && !schedule.value.on) {
-        // 从自定义档关掉开关: 不发请求, 只关
-      }
+    function saveStepMin() {
+      try { localStorage.setItem('scheduleStepMin', String(schedule.value.stepMin)); } catch (e) {}
+    }
+
+    function currentIntervalSeconds() {
+      const m = Math.max(5, Math.min(1440, Number(schedule.value.minutes) || 30));
+      return m * 60;
+    }
+
+    async function saveSchedule(quiet) {
+      const silent = quiet === true;
       const interval = schedule.value.on ? currentIntervalSeconds() : 0;
       try {
         const r = await fetch('/api/schedule', {
@@ -506,15 +522,26 @@ createApp({
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ interval }),
         }).then(r => r.json());
-        if (r.ok) ElementPlus.ElMessage.success(r.msg);
+        if (r.ok) { if (!silent) ElementPlus.ElMessage.success(r.msg); }
         else ElementPlus.ElMessage.warning(r.msg || '保存失败');
         loadSchedule();
       } catch (e) { ElementPlus.ElMessage.error('保存失败: ' + e); }
     }
 
-    async function saveCustomSchedule() {
-      // 自定义分钟输入变化: 若开关开着立即保存
-      if (schedule.value.on) saveSchedule();
+    function onScheduleSwitch() {
+      saveSchedule();
+    }
+
+    let minutesTimer = null;
+    function onMinutesChange() {
+      // 连点上下箭头时合并成一次请求，避免刷屏
+      clearTimeout(minutesTimer);
+      minutesTimer = setTimeout(() => saveSchedule(true), 400);
+    }
+
+    function setMinutes(n) {
+      schedule.value.minutes = n;
+      saveSchedule();
     }
 
     function saveLotteryCfg() {
@@ -802,7 +829,7 @@ createApp({
       } catch (e) {}
     }
 
-    onMounted(() => { loadStats(); loadPins(); loadAuth(); loadSchedule(); loadLotteryCfg(); loadSpeed(); loadJobs(); loadPushCfg(); });
+    onMounted(() => { loadStats(); loadPins(); loadAuth(); loadStepMin(); loadSchedule(); loadLotteryCfg(); loadSpeed(); loadJobs(); loadPushCfg(); });
 
     return { overview, pins, total, page, size, keyword, days, loading,
              authorKw, job, jobOptions, minDiggs, minComments, crawlRange, crawlDays,
@@ -810,7 +837,8 @@ createApp({
              drawer, comments, commentLoading, currentPin,
              pinChart, authorChart, cfg, scrape, exporting, startScrape, exportExcel,
              loadPins, onSort, openComments,
-             checkin, auth, schedule, openLogin, startCheckin, saveSchedule, saveCustomSchedule,
+             checkin, auth, schedule, openLogin, startCheckin, saveSchedule,
+             onScheduleSwitch, onMinutesChange, setMinutes, saveStepMin,
              lotteryCfg, saveLotteryCfg, speed, loadSpeed, saveSpeed, resetSpeed,
              pushDrawer, pushCfg, pushLogs, pushRunning, newKeyword, pushBadge,
              openPush, loadPushCfg, savePushCfg, addKeyword, removeKeyword,

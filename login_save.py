@@ -16,7 +16,7 @@ import sys
 
 from playwright.sync_api import sync_playwright
 
-from jjconfig import DATA_DIR, AUTH_PATH
+from jjconfig import DATA_DIR, AUTH_PATH, launch_playwright_browser
 
 # Windows 控制台 GBK 兼容
 for _stream in (sys.stdout, sys.stderr):
@@ -37,7 +37,8 @@ def save_auth():
     print(f"登录成功后本窗口会自动退出（最长等待 {args.wait} 秒）")
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False)  # 有头: 需要人手动登录
+        # 有头: 需要人手动登录；本机没有 Playwright 内核时自动用 Chrome / Edge
+        browser = launch_playwright_browser(p, headless=False)
         ctx = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                        "AppleWebKit/537.36 (KHTML, like Gecko) "
