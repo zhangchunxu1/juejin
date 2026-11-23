@@ -360,5 +360,165 @@
     "prizes": [],
     "lottery": "今日免费次数已用完（未抽奖，不消耗矿石）",
     "points": 2356
+  },
+  {
+    "time": "2026-11-12 15:08:10",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 1,
+    "total_days": 30,
+    "free_count_before": 1,
+    "point_cost": 200,
+    "points_before": 2357,
+    "drew_free": 1,
+    "drew_paid": 0,
+    "prizes": [
+      "82矿石"
+    ],
+    "lottery": "抽奖完成[免费 1 次]: 82矿石",
+    "points": 2439
+  },
+  {
+    "time": "2026-11-16 14:07:11",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 1,
+    "total_days": 31,
+    "free_count_before": 1,
+    "point_cost": 200,
+    "points_before": 2440,
+    "drew_free": 1,
+    "drew_paid": 0,
+    "prizes": [
+      "99矿石"
+    ],
+    "lottery": "抽奖完成[免费 1 次]: 99矿石",
+    "points": 2539
+  },
+  {
+    "time": "2026-11-17 16:25:59",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 2,
+    "total_days": 32,
+    "free_count_before": 1,
+    "point_cost": 200,
+    "points_before": 2540,
+    "drew_free": 1,
+    "drew_paid": 0,
+    "prizes": [
+      "91矿石"
+    ],
+    "lottery": "抽奖完成[免费 1 次]: 91矿石",
+    "points": 2631
+  },
+  {
+    "time": "2026-11-17 16:40:26",
+    "mode": "all",
+    "status": "今日已签到（无需重复操作）",
+    "cont_days": 2,
+    "total_days": 32,
+    "free_count_before": 0,
+    "point_cost": 200,
+    "points_before": 2631,
+    "drew_free": 0,
+    "drew_paid": 0,
+    "prizes": [],
+    "lottery": "今日免费次数已用完（未抽奖，不消耗矿石）",
+    "points": 2631
+  },
+  {
+    "time": "2026-11-18 11:03:37",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 3,
+    "total_days": 33,
+    "free_count_before": 1,
+    "point_cost": 200,
+    "points_before": 2632,
+    "drew_free": 1,
+    "drew_paid": 0,
+    "prizes": [
+      "22矿石"
+    ],
+    "lottery": "抽奖完成[免费 1 次]: 22矿石",
+    "points": 2654
+  },
+  {
+    "time": "2026-11-19 10:47:17",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 4,
+    "total_days": 34,
+    "free_count_before": 1,
+    "point_cost": 200,
+    "points_before": 2655,
+    "drew_free": 1,
+    "drew_paid": 0,
+    "prizes": [
+      "57矿石"
+    ],
+    "lottery": "抽奖完成[免费 1 次]: 57矿石",
+    "points": 2712
+  },
+  {
+    "time": "2026-11-20 11:04:46",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 5,
+    "total_days": 35,
+    "free_count_before": 1,
+    "point_cost": 200,
+    "points_before": 2713,
+    "drew_free": 1,
+    "drew_paid": 0,
+    "prizes": [
+      "73矿石"
+    ],
+    "lottery": "抽奖完成[免费 1 次]: 73矿石",
+    "points": 2786
+  },
+  {
+    "time": "2026-11-20 11:10:19",
+    "mode": "lottery",
+    "status": "今日免费次数已用完",
+    "free_count_before": 0,
+    "point_cost": 200,
+    "points_before": 2786,
+    "drew_free": 0,
+    "drew_paid": 0,
+    "prizes": [],
+    "lottery": "今日免费次数已用完（未抽奖，不消耗矿石）",
+    "points": 2786
+  },
+  {
+    "time": "2026-11-23 14:39:42",
+    "mode": "all",
+    "status": "签到成功",
+    "cont_days": 1,
+    "total_days": 36,
+    "free_count_before": 1,
+    "point_cost": 200,
+    "points_before": 2787,
+    "drew_free": 1,
+    "drew_paid": 0,
+    "prizes": [
+      "69矿石"
+    ],
+    "lottery": "抽奖完成[免费 1 次]: 69矿石",
+    "points": 2856
+  },
+  {
+    "time": "2026-11-23 17:37:29",
+    "mode": "lottery",
+    "status": "今日免费次数已用完",
+    "free_count_before": 0,
+    "point_cost": 200,
+    "points_before": 2856,
+    "drew_free": 0,
+    "drew_paid": 0,
+    "prizes": [],
+    "lottery": "今日免费次数已用完（未抽奖，不消耗矿石）",
+    "points": 2856
   }
 ]

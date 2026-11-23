@@ -8,7 +8,7 @@
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; background: #f0f2f5; font-family: "Helvetica Neue", Arial, "PingFang SC", "Microsoft YaHei", sans-serif; }
-    #app { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    #app { max-width: 1600px; margin: 0 auto; padding: 20px; }
     .header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 16px; }
     .header h2 { margin: 0; color: #1e80ff; }
     .header .sub { color: #8a919f; font-size: 13px; }
@@ -29,7 +29,31 @@
            overflow: auto; white-space: pre-wrap; word-break: break-all;
            font-family: Consolas, monospace; margin: 10px 0 0; color: #515767; }
     .form-item { display: flex; align-items: center; gap: 8px; color: #515767; font-size: 14px; }
-    @media (max-width: 900px) {
+    /* ---- 左右两栏：左侧操作/图表常驻，右侧沸点数据首屏可见 ---- */
+    .main-layout { display: grid; grid-template-columns: 400px minmax(0, 1fr); gap: 16px; align-items: start; }
+    .main-layout.is-stack { grid-template-columns: 1fr; }
+    .side-col, .main-col { min-width: 0; }
+    .side-col { position: sticky; top: 16px; max-height: calc(100vh - 32px);
+                overflow-y: auto; padding-right: 4px; }
+    .side-col::-webkit-scrollbar { width: 6px; }
+    .side-col::-webkit-scrollbar-thumb { background: #dcdfe6; border-radius: 3px; }
+    .side-col .charts { grid-template-columns: 1fr; }
+    .side-col .charts .panel { margin-bottom: 0; }
+    .side-col .chart { height: 240px; }
+    /* 窄栏里控件整行换行，标签不要被压成竖排；长说明藏起来（README 有） */
+    .side-col .toolbar { row-gap: 8px; }
+    .side-col .form-item { flex-wrap: wrap; row-gap: 6px; }
+    .side-col .form-item > span:first-child { white-space: nowrap; }
+    .side-col .wide-hint { display: none; }
+    .main-layout.is-stack .side-col { position: static; max-height: none; overflow: visible; }
+    .main-layout.is-stack .side-col .wide-hint { display: inline; }
+    .main-layout.is-stack .side-col .charts { grid-template-columns: 1fr 1fr; }
+    .main-layout.is-stack .side-col .chart { height: 300px; }
+    @media (max-width: 1100px) {
+      .main-layout { grid-template-columns: 1fr; }
+      .side-col { position: static; max-height: none; overflow: visible; }
+      .side-col .charts { grid-template-columns: 1fr 1fr; }
+      .side-col .chart { height: 300px; }
       .stat-cards, .charts { grid-template-columns: 1fr 1fr; }
     }
   </style>
@@ -39,7 +63,12 @@
   <div class="header">
     <h2>掘金沸点数据看板</h2>
     <span class="sub" v-if="overview.last_crawl">最近抓取：{{ overview.last_crawl }}</span>
-    <el-badge :value="pushBadge" :hidden="!pushBadge" style="margin-left:auto">
+    <el-radio-group v-model="layout" size="small" @change="saveLayout"
+                    style="margin-left:auto;align-self:center">
+      <el-radio-button :value="'split'">左右布局</el-radio-button>
+      <el-radio-button :value="'stack'">上下布局</el-radio-button>
+    </el-radio-group>
+    <el-badge :value="pushBadge" :hidden="!pushBadge">
       <el-button type="primary" plain @click="openPush">推送中心</el-button>
     </el-badge>
   </div>
@@ -52,11 +81,9 @@
     <div class="stat-card"><div class="label">评论总数（平台）</div><div class="value">{{ overview.comment_total ?? '-' }}</div></div>
   </div>
 
-  <!-- 图表 -->
-  <div class="charts">
-    <div class="panel"><h3>点赞 TOP10 沸点</h3><div ref="pinChart" class="chart"></div></div>
-    <div class="panel"><h3>上榜次数 TOP10 作者</h3><div ref="authorChart" class="chart"></div></div>
-  </div>
+  <!-- 左右两栏：左侧操作区常驻，右侧沸点数据首屏可见 -->
+  <div class="main-layout" :class="{ 'is-stack': layout === 'stack' }">
+    <div class="side-col">
 
   <!-- 抓取控制 -->
   <div class="panel">
@@ -89,7 +116,7 @@
                         type="date" placeholder="选日期" value-format="YYYY-MM-DD"
                         :disabled-date="(d) => d.getTime() > Date.now()"
                         size="small" style="width:140px;margin-left:8px"></el-date-picker>
-        <span class="sub" style="color:#8a919f;font-size:12px">选日期后只在热门榜里保留该天发布的沸点；翻完榜没有就提示 0 条</span>
+        <span class="sub wide-hint" style="color:#8a919f;font-size:12px">选日期后只在热门榜里保留该天发布的沸点；翻完榜没有就提示 0 条</span>
       </div>
       <el-collapse style="min-width:220px;border:none">
         <el-collapse-item title="高级设置（抓取节奏）" name="speed" style="font-size:13px">
@@ -121,14 +148,14 @@
         <span>自动抓取</span>
         <el-switch v-model="schedule.on" @change="onScheduleSwitch"></el-switch>
       </div>
-      <div class="form-item">
+      <div class="form-item schedule-row">
         <span>每隔</span>
         <el-input-number v-model="schedule.minutes" :min="5" :max="1440" :precision="0"
-                         :step="schedule.stepMin" size="small" style="width:120px"
+                         :step="schedule.stepMin" size="small" style="width:112px"
                          class="schedule-minutes" :disabled="!schedule.on"
                          @change="onMinutesChange"></el-input-number>
-        <span style="font-size:13px;color:#515767">分钟抓一次</span>
-        <el-select v-model="schedule.stepMin" size="small" style="width:118px;margin-left:6px"
+        <span style="font-size:13px;color:#515767">分钟</span>
+        <el-select v-model="schedule.stepMin" size="small" style="width:112px;margin-left:6px"
                    class="schedule-step" :disabled="!schedule.on" @change="saveStepMin">
           <el-option :value="5" label="步长 5 分钟"></el-option>
           <el-option :value="10" label="步长 10 分钟"></el-option>
@@ -136,7 +163,7 @@
           <el-option :value="30" label="步长 30 分钟"></el-option>
           <el-option :value="60" label="步长 60 分钟"></el-option>
         </el-select>
-        <span class="sub" style="color:#8a919f;font-size:12px">点上下箭头按步长加减，也可直接输入，自动保存</span>
+        <span class="sub wide-hint" style="color:#8a919f;font-size:12px">点上下箭头按步长加减，也可直接输入，自动保存</span>
       </div>
       <div class="form-item">
         <span class="sub" style="color:#8a919f;font-size:12px">快捷</span>
@@ -190,6 +217,15 @@
     </div>
     <div v-if="checkin.log" class="log">{{ checkin.log }}</div>
   </div>
+
+  <!-- 图表放左栏底部，次要信息不抢首屏 -->
+  <div class="charts">
+    <div class="panel"><h3>点赞 TOP10 沸点</h3><div ref="pinChart" class="chart"></div></div>
+    <div class="panel"><h3>上榜次数 TOP10 作者</h3><div ref="authorChart" class="chart"></div></div>
+  </div>
+
+    </div><!-- /side-col -->
+    <div class="main-col">
 
   <!-- 沸点列表 -->
   <div class="panel">
@@ -273,6 +309,9 @@
                      @current-change="loadPins()" @size-change="loadPins(1)"></el-pagination>
     </div>
   </div>
+
+    </div><!-- /main-col -->
+  </div><!-- /main-layout -->
 
   <!-- 评论抽屉 -->
   <el-drawer v-model="drawer" :title="'评论 - ' + (currentPin ? currentPin.author : '')" size="55%">
@@ -431,6 +470,7 @@ createApp({
     const pushRunning = ref(false);
     const newKeyword = ref('');
     const pushBadge = ref('');
+    const layout = ref('split');   // split=左右两栏（默认），stack=原来的上下结构
     let pollTimer = null;
     let checkinTimer = null;
 
@@ -494,6 +534,19 @@ createApp({
         }
         schedule.value.nextRun = r.next_run;
       } catch (e) {}
+    }
+
+    function loadLayout() {
+      try {
+        const s = localStorage.getItem('dashLayout');
+        if (s === 'split' || s === 'stack') layout.value = s;
+      } catch (e) {}
+    }
+
+    function saveLayout() {
+      try { localStorage.setItem('dashLayout', layout.value); } catch (e) {}
+      // 切换布局后容器宽度变了，让 ECharts 重新按新宽度绘制
+      window.dispatchEvent(new Event('resize'));
     }
 
     function loadStepMin() {
@@ -829,9 +882,10 @@ createApp({
       } catch (e) {}
     }
 
-    onMounted(() => { loadStats(); loadPins(); loadAuth(); loadStepMin(); loadSchedule(); loadLotteryCfg(); loadSpeed(); loadJobs(); loadPushCfg(); });
+    onMounted(() => { loadLayout(); loadStats(); loadPins(); loadAuth(); loadStepMin(); loadSchedule(); loadLotteryCfg(); loadSpeed(); loadJobs(); loadPushCfg(); });
 
-    return { overview, pins, total, page, size, keyword, days, loading,
+    return { layout, saveLayout,
+             overview, pins, total, page, size, keyword, days, loading,
              authorKw, job, jobOptions, minDiggs, minComments, crawlRange, crawlDays,
              resetFilters,
              drawer, comments, commentLoading, currentPin,
